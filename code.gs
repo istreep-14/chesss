@@ -11,10 +11,12 @@ function setupSheet() {
     sheet.appendRow([
       'Timestamp',
       'URL',
+      'Game ID',
       'Rated',
       'Time class',
       'Time control',
       'Rules',
+      'Format',
       'Color',
       'Opponent',
       'Opponent rating',
@@ -159,10 +161,12 @@ function buildRow(details) {
   return [
     details.timestamp,                // Timestamp
     details.url,                      // URL
+    details.gameId || '',             // Game ID
     details.rated ? 'Yes' : 'No',     // Rated
     details.timeClass,                // Time class
     details.timeControl,              // Time control
     details.rules,                    // Rules
+    details.format || '',             // Format
     details.color,                    // Color
     details.opponentUsername,         // Opponent
     details.opponentRating || '',     // Opponent rating
@@ -205,6 +209,7 @@ function normalizeGame(game) {
   var timeClass = game.time_class || '';
   var timeControl = game.time_control || '';
   var rules = game.rules || '';
+  var format = '';
   var result = determineResult(side, opponent);
   var reason = determineReason(side, opponent);
 
@@ -221,11 +226,11 @@ function normalizeGame(game) {
   if (game.pgn) {
     try {
       var pgn = String(game.pgn);
-      // Extract tags like [ECO "B01"] and [OpeningUrl "..."] or [Opening "..."]
+      // Extract tags like [ECO "B01"] and [ECOUrl "..."]
       var ecoMatch = pgn.match(/\n\[ECO\s+"([^"]+)"\]/);
       if (ecoMatch && ecoMatch[1] && !eco) eco = ecoMatch[1];
-      var openingUrlMatch = pgn.match(/\n\[OpeningUrl\s+"([^"]+)"\]/);
-      if (openingUrlMatch && openingUrlMatch[1]) openingUrl = openingUrlMatch[1];
+      var ecoUrlMatch = pgn.match(/\n\[ECOUrl\s+"([^"]+)"\]/);
+      if (ecoUrlMatch && ecoUrlMatch[1]) openingUrl = ecoUrlMatch[1];
       // Extract movetext: content after the last closing bracket line of headers
       var splitIndex = pgn.lastIndexOf(']\n');
       if (splitIndex !== -1) {
@@ -240,21 +245,32 @@ function normalizeGame(game) {
     }
   }
 
-  // Prefer Chess.com API-derived opening URL when available
-  if (game.opening_url) {
-    openingUrl = game.opening_url;
-  } else if (game.eco_url) {
-    openingUrl = game.eco_url;
+  // Derive format per rules
+  if (rules === 'chess') {
+    format = timeClass || '';
+  } else if (rules === 'chess960') {
+    format = (timeClass === 'daily') ? 'daily 960' : 'live960';
+  } else {
+    format = rules || '';
+  }
+
+  // Extract game ID from URL (numbers after the last '/')
+  var gameId = '';
+  if (game.url) {
+    var idMatch = String(game.url).match(/\/(\d+)(?:\?.*)?$/);
+    if (idMatch && idMatch[1]) gameId = idMatch[1];
   }
 
   return {
     isPlayerInGame: true,
     timestamp: endTime,
     url: game.url || '',
+    gameId: gameId,
     rated: rated,
     timeClass: timeClass,
     timeControl: timeControl,
     rules: rules,
+    format: format,
     color: color,
     opponentUsername: opponent && opponent.username ? opponent.username : 'Unknown',
     opponentRating: opponent && opponent.rating ? opponent.rating : '',
