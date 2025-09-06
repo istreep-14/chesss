@@ -352,6 +352,12 @@ function normalizeGame(game) {
       if (ecoMatch && ecoMatch[1]) eco = ecoMatch[1];
       var ecoUrlMatch = pgn.match(/^\[(?:ECOUrl|OpeningUrl)\s+"([^"]+)"\]/m);
       if (ecoUrlMatch && ecoUrlMatch[1]) openingUrl = ecoUrlMatch[1];
+      // Also derive SAN moves and Clocks from the PGN movetext for normal flow
+      var sanClockParsed = parsePgnToSanAndClocks(pgn);
+      if (sanClockParsed) {
+        movesSan = sanClockParsed.movesSan || movesSan;
+        clocksStr = sanClockParsed.clocks || clocksStr;
+      }
     } catch (e) {
       // ignore PGN parse issues
     }
