@@ -35,6 +35,28 @@ Create a sheet named `Games` with at least these columns:
 24. `WhiteMissedWins`
 25. `BlackMissedWins`
 26. `TheoryLikePly`
+27. `MyUsername`
+28. `OppUsername`
+29. `MyColor`
+30. `MyRating`
+31. `OppRating`
+32. `TimeControl`
+33. `InitialSec`
+34. `Increment`
+35. `SpeedClass`
+36. `Termination`
+37. `MovesCount`
+38. `Plies`
+39. `MyAvgMoveTimeSec`
+40. `OppAvgMoveTimeSec`
+41. `MyTPMoves<=10s`
+42. `MyTPMoves<=5s`
+43. `MyACPL_Open`
+44. `MyACPL_Mid`
+45. `MyACPL_End`
+46. `OppACPL_Open`
+47. `OppACPL_Mid`
+48. `OppACPL_End`
 
 `gs_opening_from_pgn.gs` will ensure the Opening columns (6–10) exist.
 
@@ -57,6 +79,13 @@ Create a sheet named `Games` with at least these columns:
    - `White/BlackInaccuracies`, `Mistakes`, `Blunders`: counts by thresholds (>0.50, >1.00, >3.00 pawns)
    - `White/BlackMissedWins`: had ≥ +3.0 then dropped to ≤ +1.0 (heuristic)
    - `TheoryLikePly`: longest early streak where eval near 0 and swing small (heuristic)
+
+   And insights fields (per-game metadata and time stats):
+   - `MyUsername`, `OppUsername`, `MyColor`, `MyRating`, `OppRating`
+   - `TimeControl`, `InitialSec`, `Increment`, `SpeedClass`, `Termination`
+   - `MovesCount`, `Plies`, `MyAvgMoveTimeSec`, `OppAvgMoveTimeSec`
+   - `MyTPMoves<=10s`, `MyTPMoves<=5s` (time-pressure counts)
+   - `MyACPL_Open/Mid/End` and `OppACPL_Open/Mid/End` (phase split)
 
 Example mapping:
 
@@ -82,3 +111,4 @@ Result:          1-0
 - Lichess determines `[Opening]` and `[ECO]` from the position (transposition-aware), not just the move order.
 - If the PGN lacks those tags, existing opening columns are left unchanged.
 - For very large PGNs, consider storing them outside the main sheet to avoid cell size limits.
+ - Set your username once: run `setMyUsernameInteractive()` so side-aware metrics map to you.

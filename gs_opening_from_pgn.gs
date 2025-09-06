@@ -4,6 +4,7 @@
 // in a Google Sheet. This relies solely on PGN tags: [Opening "..."] and [ECO "..."]
 
 const SHEET_NAME = 'Games';
+const SCRIPT_PROP_MY_USERNAME_KEY = 'MY_USERNAME';
 
 // Column indices (1-based)
 const COL = {
@@ -28,18 +29,40 @@ const COL = {
   BLACK_BLUN: 23,   // Column W: BlackBlunders
   WHITE_MISSED_WINS: 24, // Column X: WhiteMissedWins (approx)
   BLACK_MISSED_WINS: 25, // Column Y: BlackMissedWins (approx)
-  THEORY_LIKE_PLY: 26    // Column Z: TheoryLikePly (heuristic)
+  THEORY_LIKE_PLY: 26,    // Column Z: TheoryLikePly (heuristic)
+  MY_USERNAME: 27,       // Column AA: MyUsername
+  OPP_USERNAME: 28,      // Column AB: OppUsername
+  MY_COLOR: 29,          // Column AC: MyColor (White/Black)
+  MY_RATING: 30,         // Column AD: MyRating
+  OPP_RATING: 31,        // Column AE: OppRating
+  TIME_CONTROL: 32,      // Column AF: TimeControl (e.g., 300+0)
+  INITIAL_SEC: 33,       // Column AG: InitialSec
+  INCREMENT: 34,         // Column AH: Increment
+  SPEED_CLASS: 35,       // Column AI: SpeedClass (bullet/blitz/rapid/classical)
+  TERMINATION: 36,       // Column AJ: Termination
+  MOVES_COUNT: 37,       // Column AK: MovesCount
+  PLIES: 38,             // Column AL: Plies
+  MY_AVG_MOVE_SEC: 39,   // Column AM: MyAvgMoveTimeSec
+  OPP_AVG_MOVE_SEC: 40,  // Column AN: OppAvgMoveTimeSec
+  MY_TP_LE10: 41,        // Column AO: MyTimePressureMoves<=10s
+  MY_TP_LE5: 42,         // Column AP: MyTimePressureMoves<=5s
+  MY_ACPL_OPEN: 43,      // Column AQ: MyACPL_Opening
+  MY_ACPL_MID: 44,       // Column AR: MyACPL_Midgame
+  MY_ACPL_END: 45,       // Column AS: MyACPL_Endgame
+  OPP_ACPL_OPEN: 46,     // Column AT: OppACPL_Opening
+  OPP_ACPL_MID: 47,      // Column AU: OppACPL_Midgame
+  OPP_ACPL_END: 48       // Column AV: OppACPL_Endgame
 };
 
 // Ensure the header row has expected titles for the opening columns
 function ensureOpeningHeaders_() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
-  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.THEORY_LIKE_PLY)).getValues()[0];
+  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.OPP_ACPL_END)).getValues()[0];
 
   // Expand columns if needed
-  if (sheet.getMaxColumns() < COL.THEORY_LIKE_PLY) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.THEORY_LIKE_PLY - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < COL.OPP_ACPL_END) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.OPP_ACPL_END - sheet.getMaxColumns());
   }
 
   const expected = {
@@ -63,7 +86,29 @@ function ensureOpeningHeaders_() {
     [COL.BLACK_BLUN - 1]: 'BlackBlunders',
     [COL.WHITE_MISSED_WINS - 1]: 'WhiteMissedWins',
     [COL.BLACK_MISSED_WINS - 1]: 'BlackMissedWins',
-    [COL.THEORY_LIKE_PLY - 1]: 'TheoryLikePly'
+    [COL.THEORY_LIKE_PLY - 1]: 'TheoryLikePly',
+    [COL.MY_USERNAME - 1]: 'MyUsername',
+    [COL.OPP_USERNAME - 1]: 'OppUsername',
+    [COL.MY_COLOR - 1]: 'MyColor',
+    [COL.MY_RATING - 1]: 'MyRating',
+    [COL.OPP_RATING - 1]: 'OppRating',
+    [COL.TIME_CONTROL - 1]: 'TimeControl',
+    [COL.INITIAL_SEC - 1]: 'InitialSec',
+    [COL.INCREMENT - 1]: 'Increment',
+    [COL.SPEED_CLASS - 1]: 'SpeedClass',
+    [COL.TERMINATION - 1]: 'Termination',
+    [COL.MOVES_COUNT - 1]: 'MovesCount',
+    [COL.PLIES - 1]: 'Plies',
+    [COL.MY_AVG_MOVE_SEC - 1]: 'MyAvgMoveTimeSec',
+    [COL.OPP_AVG_MOVE_SEC - 1]: 'OppAvgMoveTimeSec',
+    [COL.MY_TP_LE10 - 1]: 'MyTPMoves<=10s',
+    [COL.MY_TP_LE5 - 1]: 'MyTPMoves<=5s',
+    [COL.MY_ACPL_OPEN - 1]: 'MyACPL_Open',
+    [COL.MY_ACPL_MID - 1]: 'MyACPL_Mid',
+    [COL.MY_ACPL_END - 1]: 'MyACPL_End',
+    [COL.OPP_ACPL_OPEN - 1]: 'OppACPL_Open',
+    [COL.OPP_ACPL_MID - 1]: 'OppACPL_Mid',
+    [COL.OPP_ACPL_END - 1]: 'OppACPL_End'
   };
 
   let mutated = false;
@@ -80,7 +125,7 @@ function ensureOpeningHeaders_() {
   }
 }
 
-// Main entry: read PGN from column E and fill opening columns F-J, analysis K-M, and metrics N-Z
+// Main entry: read PGN from column E and fill opening columns F-J, analysis K-M, metrics N-Z, and insights AA-AV
 function updateOpeningsFromAnalyzedPgnSheet() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
@@ -97,10 +142,12 @@ function updateOpeningsFromAnalyzedPgnSheet() {
   const existingOpenings = sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).getValues();
   const existingAnalysis = sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).getValues();
   const existingMetrics = sheet.getRange(2, COL.WHITE_ACPL, rowCount, (COL.THEORY_LIKE_PLY - COL.WHITE_ACPL + 1)).getValues();
+  const existingInsights = sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.OPP_ACPL_END - COL.MY_USERNAME + 1)).getValues();
 
   const openingOutputs = new Array(rowCount);
   const analysisOutputs = new Array(rowCount);
   const metricsOutputs = new Array(rowCount);
+  const insightsOutputs = new Array(rowCount);
 
   for (let i = 0; i < rowCount; i++) {
     const pgnText = (pgnValues[i][0] || '').toString();
@@ -109,6 +156,7 @@ function updateOpeningsFromAnalyzedPgnSheet() {
       openingOutputs[i] = existingOpenings[i];
       analysisOutputs[i] = existingAnalysis[i];
       metricsOutputs[i] = existingMetrics[i];
+      insightsOutputs[i] = existingInsights[i];
       continue;
     }
 
@@ -116,6 +164,12 @@ function updateOpeningsFromAnalyzedPgnSheet() {
     const analysis = parseAnalysisFieldsFromPgn(pgnText);
     const evals = parseEvalSequenceFromPgn_(pgnText);
     const metrics = computeEvalMetrics_(evals);
+    const clocks = parseClocksSequenceFromPgn_(pgnText);
+    const players = parsePlayersAndGameTagsFromPgn_(pgnText);
+    const my = determineMyOrientation_(players.whiteName, players.blackName);
+    const movesInfo = estimateMovesAndPlies_(evals, pgnText);
+    const timeMetrics = computeTimeMetrics_(clocks, my.side, players.initialSec);
+    const phaseAcpl = computeAcplByPhase_(evals, metrics ? metrics.theoryLikePly : 0);
     // If no opening parsed, keep existing
     if (!opening || !(opening.family || opening.variation || opening.sub1 || opening.sub2 || opening.eco)) {
       openingOutputs[i] = existingOpenings[i];
@@ -151,11 +205,38 @@ function updateOpeningsFromAnalyzedPgnSheet() {
         metrics.theoryLikePly
       ];
     }
+
+    // Insights row
+    insightsOutputs[i] = [
+      my.username || '',
+      my.oppUsername || '',
+      my.side ? (my.side === 'w' ? 'White' : 'Black') : '',
+      my.rating != null ? my.rating : '',
+      my.oppRating != null ? my.oppRating : '',
+      players.timeControl || '',
+      players.initialSec != null ? players.initialSec : '',
+      players.increment != null ? players.increment : '',
+      players.speedClass || '',
+      players.termination || '',
+      movesInfo.moves != null ? movesInfo.moves : '',
+      movesInfo.plies != null ? movesInfo.plies : '',
+      timeMetrics.myAvgSec != null ? round1_(timeMetrics.myAvgSec) : '',
+      timeMetrics.oppAvgSec != null ? round1_(timeMetrics.oppAvgSec) : '',
+      timeMetrics.myTPLe10 != null ? timeMetrics.myTPLe10 : '',
+      timeMetrics.myTPLe5 != null ? timeMetrics.myTPLe5 : '',
+      phaseAcpl.myOpen != null ? phaseAcpl.myOpen : '',
+      phaseAcpl.myMid != null ? phaseAcpl.myMid : '',
+      phaseAcpl.myEnd != null ? phaseAcpl.myEnd : '',
+      phaseAcpl.oppOpen != null ? phaseAcpl.oppOpen : '',
+      phaseAcpl.oppMid != null ? phaseAcpl.oppMid : '',
+      phaseAcpl.oppEnd != null ? phaseAcpl.oppEnd : ''
+    ];
   }
 
   sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).setValues(openingOutputs);
   sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).setValues(analysisOutputs);
   sheet.getRange(2, COL.WHITE_ACPL, rowCount, (COL.THEORY_LIKE_PLY - COL.WHITE_ACPL + 1)).setValues(metricsOutputs);
+  sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.OPP_ACPL_END - COL.MY_USERNAME + 1)).setValues(insightsOutputs);
 }
 
 // Extracts Opening/ECO tags and splits into family/variation/sub-variations
@@ -308,6 +389,200 @@ function computeEvalMetrics_(evals) {
     theoryLikePly: theoryLikePly
   };
 }
+
+// ======= Insights helpers =======
+
+function setMyUsernameInteractive() {
+  const username = Browser.inputBox('Enter your Lichess username (stored in Script Properties):');
+  if (username && username !== 'cancel') {
+    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_MY_USERNAME_KEY, username.trim());
+    SpreadsheetApp.getActive().toast('Username saved.');
+  }
+}
+
+function determineMyOrientation_(whiteName, blackName) {
+  const myUsername = (PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_MY_USERNAME_KEY) || '').trim();
+  const w = (whiteName || '').toLowerCase();
+  const b = (blackName || '').toLowerCase();
+  const me = (myUsername || '').toLowerCase();
+  let side = '';
+  let username = '';
+  let oppUsername = '';
+  let rating = null;
+  let oppRating = null;
+  if (me && w === me) {
+    side = 'w'; username = whiteName; oppUsername = blackName;
+  } else if (me && b === me) {
+    side = 'b'; username = blackName; oppUsername = whiteName;
+  }
+  return { side: side, username: username, oppUsername: oppUsername, rating: null, oppRating: null };
+}
+
+function parsePlayersAndGameTagsFromPgn_(pgnText) {
+  const whiteName = extractPgnTag_(pgnText, 'White');
+  const blackName = extractPgnTag_(pgnText, 'Black');
+  const whiteEloStr = extractPgnTag_(pgnText, 'WhiteElo');
+  const blackEloStr = extractPgnTag_(pgnText, 'BlackElo');
+  const timeControl = extractPgnTag_(pgnText, 'TimeControl');
+  const termination = extractPgnTag_(pgnText, 'Termination');
+
+  const tc = parseTimeControl_(timeControl);
+  const speedClass = classifySpeed_(tc.initialSec, tc.increment);
+
+  return {
+    whiteName: whiteName,
+    blackName: blackName,
+    whiteElo: parseIntSafe_(whiteEloStr),
+    blackElo: parseIntSafe_(blackEloStr),
+    timeControl: timeControl,
+    initialSec: tc.initialSec,
+    increment: tc.increment,
+    speedClass: speedClass,
+    termination: termination
+  };
+}
+
+function parseIntSafe_(s) {
+  const n = parseInt((s || '').toString(), 10);
+  return isFinite(n) ? n : null;
+}
+
+function parseTimeControl_(tc) {
+  // Formats: "300+0", "600+5", "600" (no increment), "-" (no clock)
+  if (!tc || tc === '-') return { initialSec: null, increment: null };
+  const parts = tc.split('+');
+  const initialSec = parseIntSafe_(parts[0]);
+  const increment = parts.length > 1 ? parseIntSafe_(parts[1]) : 0;
+  return { initialSec: initialSec, increment: increment };
+}
+
+function classifySpeed_(initialSec, increment) {
+  if (initialSec == null) return '';
+  const inc = increment || 0;
+  const base = initialSec + inc * 40;
+  if (base < 180) return 'bullet';
+  if (base < 480) return 'blitz';
+  if (base < 1500) return 'rapid';
+  return 'classical';
+}
+
+function parseClocksSequenceFromPgn_(pgnText) {
+  const re = /\[%clk\s+([0-9:]+)\]/g;
+  const arr = [];
+  let m;
+  while ((m = re.exec(pgnText)) !== null) {
+    arr.push(parseClockStrToSec_(m[1]));
+  }
+  return arr; // clocks per ply in move order (White then Black repeating)
+}
+
+function parseClockStrToSec_(s) {
+  const parts = (s || '').split(':').map(function(p){return parseInt(p,10)||0;});
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+  if (parts.length === 2) return parts[0]*60 + parts[1];
+  return parseInt(s,10)||0;
+}
+
+function estimateMovesAndPlies_(evals, pgnText) {
+  const plies = (evals && evals.length) ? evals.length : estimatePliesFromPgn_(pgnText);
+  const moves = Math.ceil((plies || 0) / 2);
+  return { plies: plies, moves: moves };
+}
+
+function estimatePliesFromPgn_(pgnText) {
+  // Fallback: count move numbers like "1.", "2." etc and multiply by 2 approximately
+  const nums = (pgnText.match(/\n\d+\./g) || []).length;
+  return nums * 2;
+}
+
+function computeTimeMetrics_(clocks, mySide, initialSec) {
+  const result = { myAvgSec: null, oppAvgSec: null, myTPLe10: null, myTPLe5: null };
+  if (!clocks || !clocks.length) return result;
+  // Build per-side sequences
+  const whiteClocks = [];
+  const blackClocks = [];
+  for (let i = 0; i < clocks.length; i++) {
+    if (i % 2 === 0) whiteClocks.push(clocks[i]);
+    else blackClocks.push(clocks[i]);
+  }
+  const comp = function(seq, init) {
+    let times = [];
+    for (let i = 0; i < seq.length; i++) {
+      if (i === 0) {
+        if (init != null && seq[i] != null) times.push(Math.max(0, init - seq[i]));
+      } else if (seq[i-1] != null && seq[i] != null) {
+        times.push(Math.max(0, seq[i-1] - seq[i]));
+      }
+    }
+    if (!times.length) return { avg: null, median: null, tp10: 0, tp5: 0 };
+    const avg = times.reduce(function(a,b){return a+b;},0) / times.length;
+    const sorted = times.slice().sort(function(a,b){return a-b;});
+    const mid = Math.floor(sorted.length/2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid-1]+sorted[mid])/2;
+    return {
+      avg: avg,
+      median: median,
+      tp10: seq.filter(function(s){return s != null && s <= 10;}).length,
+      tp5: seq.filter(function(s){return s != null && s <= 5;}).length
+    };
+  };
+  const white = comp(whiteClocks, initialSec);
+  const black = comp(blackClocks, initialSec);
+  if (mySide === 'w') {
+    result.myAvgSec = white.avg; result.oppAvgSec = black.avg;
+    result.myTPLe10 = white.tp10; result.myTPLe5 = white.tp5;
+  } else if (mySide === 'b') {
+    result.myAvgSec = black.avg; result.oppAvgSec = white.avg;
+    result.myTPLe10 = black.tp10; result.myTPLe5 = black.tp5;
+  }
+  return result;
+}
+
+function computeAcplByPhase_(evals, theoryLikePly) {
+  const res = { myOpen: null, myMid: null, myEnd: null, oppOpen: null, oppMid: null, oppEnd: null };
+  const mySide = determineMyOrientation_(null, null).side; // may be '' if not set; we compute white/black then map
+  if (!evals || !evals.length) return res;
+  const openEnd = Math.max(0, theoryLikePly || 0);
+  const endStart = Math.max(openEnd, evals.length - 16);
+
+  function acplForRange(start, end, side) {
+    let lossSum = 0, moves = 0;
+    for (let i = Math.max(1, start); i < Math.min(end, evals.length); i++) {
+      const mover = evals[i].side;
+      if (side === mover) {
+        const before = clampCp_(evals[i-1].cp);
+        const after = clampCp_(evals[i].cp);
+        const beforePersp = (mover === 'w') ? before : -before;
+        const afterPersp = (mover === 'w') ? after : -after;
+        const loss = Math.max(0, beforePersp - afterPersp);
+        lossSum += loss; moves++;
+      }
+    }
+    return moves ? Math.round(lossSum / moves) : null;
+  }
+
+  function clampCp_(cp) { if (cp > 2000) return 2000; if (cp < -2000) return -2000; return cp; }
+
+  const wOpen = acplForRange(0, openEnd, 'w');
+  const bOpen = acplForRange(0, openEnd, 'b');
+  const wMid = acplForRange(openEnd, endStart, 'w');
+  const bMid = acplForRange(openEnd, endStart, 'b');
+  const wEnd = acplForRange(endStart, evals.length, 'w');
+  const bEnd = acplForRange(endStart, evals.length, 'b');
+
+  if (mySide === 'w') {
+    res.myOpen = wOpen; res.myMid = wMid; res.myEnd = wEnd;
+    res.oppOpen = bOpen; res.oppMid = bMid; res.oppEnd = bEnd;
+  } else if (mySide === 'b') {
+    res.myOpen = bOpen; res.myMid = bMid; res.myEnd = bEnd;
+    res.oppOpen = wOpen; res.oppMid = wMid; res.oppEnd = wEnd;
+  } else {
+    // Unknown orientation: leave nulls
+  }
+  return res;
+}
+
+function round1_(x) { return Math.round(x * 10) / 10; }
 
 // Reads a PGN tag like [TagName "Value"] and returns the Value
 function extractPgnTag_(pgnText, tagName) {
