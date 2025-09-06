@@ -31,6 +31,7 @@ function buildOpeningInfoForSelectedRow() {
   var colEco = headerToIndex['ECO'];
   var colOpeningUrl = headerToIndex['Opening URL'];
   var colMovesSan = headerToIndex['Moves (SAN)'];
+  var colFen = headerToIndex['FEN'];
 
   var sourceUrl = String(games.getRange(row, colUrl).getValue() || '');
   var gameId = String(games.getRange(row, colGameId).getValue() || '');
@@ -121,6 +122,38 @@ function buildOpeningInfoForSelectedRow() {
   } else {
     out.getRange(r++, 1).setValue('Lichess DB Summary: (unavailable)');
   }
+
+  // =====================
+  // Cloud Eval section
+  // =====================
+  var startFen = getStartFen_();
+  var afterFirstFen = '';
+  if (firstUci) afterFirstFen = fenAfterFirstMoveFromStart_(firstUci);
+  var finalFen = colFen ? String(games.getRange(row, colFen).getValue() || '') : '';
+
+  r += 2;
+  out.getRange(r++, 1).setValue('Lichess Cloud Eval');
+  out.getRange(r, 1, 1, 5).setValues([[ 'Position', 'FEN', 'Eval (cp/mate)', 'Depth', 'PV (UCI)' ]]);
+
+  var evalRows = [];
+  var startEval = safeCloudEval_(startFen);
+  evalRows.push(['Start', startFen, startEval.evalText, startEval.depth, startEval.pv]);
+
+  if (afterFirstFen) {
+    var firstEval = safeCloudEval_(afterFirstFen);
+    evalRows.push(['After 1st move', afterFirstFen, firstEval.evalText, firstEval.depth, firstEval.pv]);
+  } else {
+    evalRows.push(['After 1st move', '(unavailable)', '', '', '']);
+  }
+
+  if (finalFen) {
+    var finalEval = safeCloudEval_(finalFen);
+    evalRows.push(['Final', finalFen, finalEval.evalText, finalEval.depth, finalEval.pv]);
+  } else {
+    evalRows.push(['Final', '(unavailable)', '', '', '']);
+  }
+
+  out.getRange(r + 1, 1, evalRows.length, 5).setValues(evalRows);
 }
 
 function ensureOpeningInfoSheet_() {
@@ -287,5 +320,94 @@ function writeExplorerBlock_(sheet, startRow, title, summary) {
   if (rows.length) sheet.getRange(r + 1, 1, rows.length, 5).setValues(rows);
   r += (rows.length + 2);
   return r;
+}
+
+function getStartFen_() {
+  return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+}
+
+function fenAfterFirstMoveFromStart_(uci) {
+  var t = String(uci || '').trim();
+  if (!t || t.length !== 4) return '';
+  var from = t.substring(0, 2);
+  var to = t.substring(2, 4);
+  var fileFrom = from.charAt(0), rankFrom = from.charAt(1);
+  var fileTo = to.charAt(0), rankTo = to.charAt(1);
+
+  // Board representation: only update piece movement for supported first moves
+  // Initialize starting board map for relevant squares
+  var board = {};
+  // Pawns
+  'abcdefgh'.split('').forEach(function(f) { board[f + '2'] = 'P'; board[f + '7'] = 'p'; });
+  // Knights
+  board['b1'] = 'N'; board['g1'] = 'N'; board['b8'] = 'n'; board['g8'] = 'n';
+  // Other pieces not needed for supported moves
+
+  var moving = board[from];
+  if (!moving) return '';
+  // Only allow white moves from initial squares we expect
+  if (moving === 'P') {
+    if (rankFrom !== '2') return '';
+    if (!(rankTo === '3' || rankTo === '4')) return '';
+    if (fileFrom !== fileTo) return '';
+  } else if (moving === 'N') {
+    var legalKnightTargets = {
+      'b1': { 'a3': true, 'c3': true },
+      'g1': { 'f3': true, 'h3': true }
+    };
+    if (!legalKnightTargets[from] || !legalKnightTargets[from][to]) return '';
+  } else {
+    return '';
+  }
+
+  // Apply move
+  board[to] = moving;
+  delete board[from];
+
+  // Build ranks 8..1
+  function pieceAt(sq) { return board[sq] || null; }
+  function makeRank(rank) {
+    var empties = 0, out = '';
+    'abcdefgh'.split('').forEach(function(f) {
+      var p = pieceAt(f + rank);
+      if (p) { if (empties) { out += String(empties); empties = 0; } out += p; }
+      else { empties++; }
+    });
+    if (empties) out += String(empties);
+    return out;
+  }
+  var placement = [ '8','7','6','5','4','3','2','1' ].map(makeRank).join('/');
+  var stm = 'b';
+  var castling = 'KQkq';
+  var ep = '-';
+  if (moving === 'P' && rankFrom === '2' && rankTo === '4') ep = fileFrom + '3';
+  var halfmove = 0;
+  var fullmove = 1;
+  return placement + ' ' + stm + ' ' + castling + ' ' + ep + ' ' + halfmove + ' ' + fullmove;
+}
+
+function safeCloudEval_(fen) {
+  if (!fen) return { evalText: '', depth: '', pv: '' };
+  try {
+    var json = lichessCloudEvalFen(fen, { multiPv: 1 });
+    var s = summarizeCloudEval_(json);
+    return s;
+  } catch (e) {
+    return { evalText: '', depth: '', pv: '' };
+  }
+}
+
+function summarizeCloudEval_(json) {
+  if (!json || !json.pvs || !json.pvs.length) return { evalText: '', depth: '', pv: '' };
+  var pv = json.pvs[0] || {};
+  var depth = (pv.depth != null) ? pv.depth : '';
+  var evalText = '';
+  if (pv.mate != null) {
+    evalText = 'M' + pv.mate;
+  } else if (pv.cp != null) {
+    evalText = String(pv.cp);
+  }
+  var pvMoves = Array.isArray(pv.moves) ? pv.moves.join(' ') : (pv.moves || '');
+  return { evalText: evalText, depth: depth, pv: pvMoves };
 }
 
