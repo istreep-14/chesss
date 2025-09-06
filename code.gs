@@ -40,6 +40,30 @@ const TRIGGER_INTERVAL_MINUTES = 15;
 // Elo K-factor to use for pregame formula estimation for established players
 const ELO_K_ESTABLISHED = 10;
 
+// =====================
+// Lichess configuration
+// =====================
+// Provide your Lichess API token via Script Properties (recommended):
+//   setLichessToken('your_token_here')
+// Or set LICHESS_TOKEN_DEFAULT below (less secure). Script Properties takes precedence.
+const LICHESS_API_BASE = 'https://lichess.org';
+const LICHESS_TOKEN_DEFAULT = '';
+function setLichessToken(token) {
+  PropertiesService.getScriptProperties().setProperty('LICHESS_TOKEN', String(token || ''));
+}
+function getLichessToken_() {
+  var p = PropertiesService.getScriptProperties().getProperty('LICHESS_TOKEN');
+  var t = (p && String(p)) || String(LICHESS_TOKEN_DEFAULT || '');
+  return t.trim();
+}
+function getLichessAuthHeaders_(accept) {
+  var headers = {};
+  if (accept) headers['Accept'] = accept;
+  var tok = getLichessToken_();
+  if (tok) headers['Authorization'] = 'Bearer ' + tok;
+  return headers;
+}
+
 function setupSheet() {
   ensureSheet();
 }
@@ -2090,4 +2114,178 @@ function backfillMyRatingPregameDerivedForRows(sheet, startRow, numRows) {
   }
   if (updated > 0) sheet.getRange(2, colDerived, total, 1).setValues(drvVals);
   return updated;
+}
+
+// =====================
+// Lichess API helpers and orchestrator
+// =====================
+
+/**
+ * Import a PGN into Lichess. Returns { id, url }.
+ * @param {string} pgn
+ * @param {{ source?: string }=} options
+ * @return {{ id: string, url: string }}
+ */
+function lichessImportGameFromPgn(pgn, options) {
+  if (!pgn || typeof pgn !== 'string') throw new Error('lichessImportGameFromPgn: PGN is required');
+  var url = LICHESS_API_BASE + '/api/import';
+  var params = options || {};
+  var body = 'pgn=' + encodeURIComponent(pgn);
+  if (params.source) body += '&source=' + encodeURIComponent(String(params.source));
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    muteHttpExceptions: true,
+    contentType: 'application/x-www-form-urlencoded',
+    payload: body,
+    headers: getLichessAuthHeaders_('application/json')
+  });
+  var code = resp.getResponseCode();
+  if (code !== 200) {
+    throw new Error('Lichess import failed: ' + code + ' ' + resp.getContentText());
+  }
+  var json = {};
+  try { json = JSON.parse(resp.getContentText()); } catch (e) {}
+  var gameUrl = String(json.url || '');
+  var id = String(json.id || (gameUrl ? gameUrl.split('/').pop() : ''));
+  if (!id) throw new Error('Lichess import succeeded but no game id in response');
+  return { id: id, url: (gameUrl || (LICHESS_API_BASE + '/' + id)) };
+}
+
+/**
+ * Export a single game PGN by Lichess game ID.
+ * @param {string} gameId
+ * @param {{ moves?: boolean, clocks?: boolean, evals?: boolean }=} options
+ * @return {string} PGN
+ */
+function lichessExportGamePgn(gameId, options) {
+  if (!gameId) throw new Error('lichessExportGamePgn: gameId required');
+  var opts = options || {};
+  // The .pgn endpoint returns text/plain PGN. Optional query params include moves, evals, clocks
+  var qs = [];
+  if (opts.moves != null) qs.push('moves=' + (opts.moves ? 'true' : 'false'));
+  if (opts.clocks != null) qs.push('clocks=' + (opts.clocks ? 'true' : 'false'));
+  if (opts.evals != null) qs.push('evals=' + (opts.evals ? 'true' : 'false'));
+  var url = LICHESS_API_BASE + '/game/export/' + encodeURIComponent(String(gameId)) + '.pgn' + (qs.length ? ('?' + qs.join('&')) : '');
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'get',
+    muteHttpExceptions: true,
+    headers: getLichessAuthHeaders_('text/plain')
+  });
+  var code = resp.getResponseCode();
+  if (code !== 200) throw new Error('Lichess export failed: ' + code + ' ' + resp.getContentText());
+  return String(resp.getContentText() || '');
+}
+
+/**
+ * Cloud-evaluate a single FEN using Lichess Cloud Eval.
+ * @param {string} fen
+ * @param {{ multiPv?: number, syzygy?: number, variant?: string }=} options
+ * @return {Object} JSON response
+ */
+function lichessCloudEvalFen(fen, options) {
+  if (!fen) throw new Error('lichessCloudEvalFen: FEN required');
+  var url = LICHESS_API_BASE + '/api/cloud-eval';
+  var params = options || {};
+  var qs = ['fen=' + encodeURIComponent(String(fen))];
+  if (isFinite(params.multiPv)) qs.push('multiPv=' + Number(params.multiPv));
+  if (isFinite(params.syzygy)) qs.push('syzygy=' + Number(params.syzygy));
+  if (params.variant) qs.push('variant=' + encodeURIComponent(String(params.variant)));
+  var resp = UrlFetchApp.fetch(url + '?' + qs.join('&'), {
+    method: 'get',
+    muteHttpExceptions: true,
+    headers: getLichessAuthHeaders_('application/json')
+  });
+  var code = resp.getResponseCode();
+  if (code !== 200) throw new Error('Cloud eval failed: ' + code + ' ' + resp.getContentText());
+  try { return JSON.parse(resp.getContentText()); } catch (e) { return {}; }
+}
+
+/**
+ * Cloud-evaluate multiple FENs. Returns array of { fen, eval } objects.
+ * @param {Array<string>} fens
+ * @param {{ multiPv?: number, syzygy?: number, variant?: string, throttleMs?: number }=} options
+ * @return {Array<{ fen: string, eval: Object }>} results
+ */
+function lichessCloudEvalFens(fens, options) {
+  var list = Array.isArray(fens) ? fens : [];
+  var opts = options || {};
+  var throttle = isFinite(opts.throttleMs) ? Number(opts.throttleMs) : 150;
+  var results = [];
+  for (var i = 0; i < list.length; i++) {
+    var fen = String(list[i] || '').trim();
+    if (!fen) continue;
+    var ev = lichessCloudEvalFen(fen, opts);
+    results.push({ fen: fen, eval: ev });
+    if (throttle > 0) Utilities.sleep(throttle);
+  }
+  return results;
+}
+
+/**
+ * OPTIONAL: Request external engine analysis. Note: This endpoint is intended for
+ * Lichess external engine operators and is not available to regular users.
+ * This function is provided for completeness and will throw unless explicitly allowed.
+ * @param {string} gameId
+ * @param {{ allow?: boolean }=} options
+ * @return {Object}
+ */
+function lichessRequestExternalEngineAnalysis(gameId, options) {
+  var opts = options || {};
+  if (!opts.allow) throw new Error('External engine analysis requires operator privileges and is disabled. Set options.allow=true if you know what you are doing.');
+  if (!gameId) throw new Error('lichessRequestExternalEngineAnalysis: gameId required');
+  // Best-effort call; path subject to Lichess operator program requirements.
+  var url = LICHESS_API_BASE + '/api/external-engine/analyse';
+  var payload = 'gameId=' + encodeURIComponent(String(gameId));
+  var resp = UrlFetchApp.fetch(url, {
+    method: 'post',
+    muteHttpExceptions: true,
+    contentType: 'application/x-www-form-urlencoded',
+    payload: payload,
+    headers: getLichessAuthHeaders_('application/json')
+  });
+  var code = resp.getResponseCode();
+  if (code !== 200 && code !== 202) {
+    throw new Error('External engine analysis request failed: ' + code + ' ' + resp.getContentText());
+  }
+  try { return JSON.parse(resp.getContentText()); } catch (e) { return { status: code }; }
+}
+
+/**
+ * Orchestrator: Import PGN into Lichess, export it back, and analyze via Cloud Eval.
+ * Optionally attempts external engine analysis if enabled.
+ * @param {string} pgn
+ * @param {{ fens?: Array<string>, fenExtractorName?: string, cloudEval?: { multiPv?: number, syzygy?: number, variant?: string, throttleMs?: number }, external?: { enabled?: boolean, allow?: boolean }, exportOptions?: { moves?: boolean, clocks?: boolean, evals?: boolean } }=} options
+ * @return {{ gameId: string, url: string, exportedPgn: string, cloudEvaluations: Array<{ fen: string, eval: Object }>, externalAnalysis?: Object }}
+ */
+function lichessImportExportAndAnalyze(pgn, options) {
+  var opts = options || {};
+  var imported = lichessImportGameFromPgn(pgn, { source: 'Apps Script' });
+  var exportedPgn = lichessExportGamePgn(imported.id, opts.exportOptions);
+
+  // Determine FENs to evaluate
+  var fens = [];
+  if (Array.isArray(opts.fens) && opts.fens.length) {
+    fens = opts.fens.slice();
+  } else if (opts.fenExtractorName && typeof this[opts.fenExtractorName] === 'function') {
+    try {
+      var extracted = this[opts.fenExtractorName](exportedPgn);
+      if (Array.isArray(extracted)) fens = extracted;
+    } catch (e) {}
+  }
+  // Cloud eval the positions if provided
+  var cloudEvaluations = fens.length ? lichessCloudEvalFens(fens, (opts.cloudEval || {})) : [];
+
+  // Optional external engine analysis (requires operator access)
+  var externalAnalysis = null;
+  if (opts.external && (opts.external.enabled || opts.external.allow)) {
+    externalAnalysis = lichessRequestExternalEngineAnalysis(imported.id, { allow: !!opts.external.allow });
+  }
+
+  return {
+    gameId: imported.id,
+    url: imported.url,
+    exportedPgn: exportedPgn,
+    cloudEvaluations: cloudEvaluations,
+    externalAnalysis: externalAnalysis
+  };
 }
