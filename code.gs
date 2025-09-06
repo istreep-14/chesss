@@ -125,6 +125,8 @@ function ensureSheet() {
       'Rated',
       'Time class',
       'Time control',
+      'Base time (s)',
+      'Increment (s)',
       'Rules',
       'Format',
       'Color',
@@ -138,7 +140,9 @@ function ensureSheet() {
       'ECO',
       'Opening URL',
       'Moves (SAN)',
-      'Clocks'
+      'Clocks',
+      'Clock Seconds',
+      'Move Times'
     ]);
     return sheet;
   }
@@ -189,6 +193,40 @@ function ensureSheet() {
     sheet.getRange(1, updatedLastCol + 1, 1, addList.length).setValues([addList]);
   }
 
+  // Ensure Base/Increment appear immediately after Time control
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var timeControlIdx = headers.indexOf('Time control');
+  if (timeControlIdx !== -1) {
+    var baseIdx = headers.indexOf('Base time (s)');
+    var incIdx = headers.indexOf('Increment (s)');
+    var insertAfter = timeControlIdx + 1; // 1-based column is timeControlIdx+1, we insert after -> +1
+    var toInsert = [];
+    if (baseIdx === -1) toInsert.push('Base time (s)');
+    if (incIdx === -1) toInsert.push('Increment (s)');
+    if (toInsert.length) {
+      sheet.insertColumnsAfter(insertAfter, toInsert.length);
+      sheet.getRange(1, insertAfter + 1, 1, toInsert.length).setValues([toInsert]);
+    }
+  }
+
+  // Ensure Clock Seconds and Move Times appear immediately after Clocks
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var clocksHeaderIdx = headers.indexOf('Clocks');
+  if (clocksHeaderIdx !== -1) {
+    var clkSecIdx = headers.indexOf('Clock Seconds');
+    var moveTimesIdx = headers.indexOf('Move Times');
+    var afterClocks = clocksHeaderIdx + 1;
+    var toInsert2 = [];
+    if (clkSecIdx === -1) toInsert2.push('Clock Seconds');
+    if (moveTimesIdx === -1) toInsert2.push('Move Times');
+    if (toInsert2.length) {
+      sheet.insertColumnsAfter(afterClocks, toInsert2.length);
+      sheet.getRange(1, afterClocks + 1, 1, toInsert2.length).setValues([toInsert2]);
+    }
+  }
+
   // Ensure additional callback-derived columns exist
   updatedLastCol = sheet.getLastColumn();
   headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
@@ -220,8 +258,6 @@ function ensureSheet() {
     'Move timestamps',
     'Move list',
     'Last move',
-    'Base time (s)',
-    'Increment (s)',
     'Rating change',
     'Is live game',
     'Is abortable',
@@ -284,6 +320,8 @@ function buildRow(details) {
     details.rated ? 'Yes' : 'No',     // Rated
     details.timeClass,                // Time class
     details.timeControl,              // Time control
+    (details.baseSeconds != null ? details.baseSeconds : ''), // Base time (s)
+    (details.incrementSeconds != null ? details.incrementSeconds : ''), // Increment (s)
     details.rules,                    // Rules
     details.format || '',             // Format
     details.color,                    // Color
@@ -297,7 +335,9 @@ function buildRow(details) {
     details.eco || '',                // ECO
     details.openingUrl || '',         // Opening URL
     details.movesSan || '',           // Moves (SAN list)
-    details.clocks || ''              // Clocks list
+    details.clocks || '',             // Clocks list
+    details.clockSeconds || '',       // Clock Seconds
+    details.moveTimes || ''           // Move Times
   ];
 }
 
@@ -344,6 +384,7 @@ function normalizeGame(game) {
   var openingUrl = '';
   var movesSan = '';
   var clocksStr = '';
+  var parsedMoves = [];
   if (game.pgn) {
     try {
       var pgn = String(game.pgn).replace(/\r\n/g, '\n');
@@ -358,6 +399,8 @@ function normalizeGame(game) {
         movesSan = sanClockParsed.movesSan || movesSan;
         clocksStr = sanClockParsed.clocks || clocksStr;
       }
+      var movetext = extractMovetextFromPgn(pgn);
+      parsedMoves = movetext ? splitMovesWithClocks(movetext) : [];
     } catch (e) {
       // ignore PGN parse issues
     }
@@ -387,6 +430,15 @@ function normalizeGame(game) {
     if (idMatch && idMatch[1]) gameId = idMatch[1];
   }
 
+  // Time control-derived base and increment
+  var tcParsedFinal = parseTimeControlToBaseInc(timeControl, timeClass);
+  var baseSecondsFinal = tcParsedFinal.baseSeconds;
+  var incSecondsFinal = tcParsedFinal.incrementSeconds;
+  // Derived strings
+  var derivedFinal = buildClockSecondsAndMoveTimes(parsedMoves, baseSecondsFinal, incSecondsFinal);
+  var clockSecondsStrFinal = derivedFinal.clockSecondsStr;
+  var moveTimesStrFinal = derivedFinal.moveTimesStr;
+
   return {
     isPlayerInGame: true,
     timestamp: endTime,
@@ -408,7 +460,11 @@ function normalizeGame(game) {
     eco: eco,
     openingUrl: openingUrl,
     movesSan: movesSan,
-    clocks: clocksStr
+    clocks: clocksStr,
+    baseSeconds: baseSecondsFinal,
+    incrementSeconds: incSecondsFinal,
+    clockSeconds: clockSecondsStrFinal,
+    moveTimes: moveTimesStrFinal
   };
 }
 
@@ -554,6 +610,114 @@ function parsePgnToSanAndClocks(pgn) {
 }
 
 /**
+ * Extracts movetext (body after headers) from a PGN string.
+ * @param {string} pgn
+ * @return {string}
+ */
+function extractMovetextFromPgn(pgn) {
+  if (!pgn) return '';
+  var normalized = String(pgn).replace(/\r\n/g, '\n');
+  var headerEnd = normalized.indexOf('\n\n');
+  if (headerEnd !== -1) return normalized.substring(headerEnd + 2);
+  var splitIndex = normalized.lastIndexOf(']\n');
+  if (splitIndex !== -1) return normalized.substring(splitIndex + 2);
+  return normalized;
+}
+
+/**
+ * Parse Time control to base and increment seconds, per rules:
+ * - If time control contains '/', treat as daily; return nulls (skip base/inc).
+ * - If time class is 'daily', also skip base/inc.
+ * - If value contains '+', base is before '+', increment is after '+', both in seconds.
+ * - Else, entire value is base seconds and increment is 0.
+ * @param {string} timeControl
+ * @param {string} timeClass
+ * @return {{baseSeconds: (number|null), incrementSeconds: (number|null)}}
+ */
+function parseTimeControlToBaseInc(timeControl, timeClass) {
+  var tc = String(timeControl || '').trim();
+  var cls = String(timeClass || '').trim().toLowerCase();
+  if (!tc) return { baseSeconds: null, incrementSeconds: null };
+  if (cls === 'daily' || tc.indexOf('/') !== -1) {
+    return { baseSeconds: null, incrementSeconds: null };
+  }
+  var base = null;
+  var inc = null;
+  if (tc.indexOf('+') !== -1) {
+    var parts = tc.split('+');
+    base = toIntSafe(parts[0]);
+    inc = toIntSafe(parts[1]);
+  } else {
+    base = toIntSafe(tc);
+    inc = 0;
+  }
+  return {
+    baseSeconds: isFinite(base) ? base : null,
+    incrementSeconds: isFinite(inc) ? inc : null
+  };
+}
+
+/**
+ * Convert string to integer safely.
+ * @param {string} s
+ * @return {number}
+ */
+function toIntSafe(s) {
+  var n = parseInt(String(s).replace(/[^0-9\-]/g, ''), 10);
+  return isFinite(n) ? n : NaN;
+}
+
+/**
+ * Build bracketed lists for Clock Seconds and Move Times.
+ * Clock Seconds mirrors the Clocks list but in seconds (numbers).
+ * Move Times is computed per side using base/increment rules:
+ *  - White first move: base - clock(white 1st) + inc, if base/inc known
+ *  - Subsequent same-side move: prevClock(side) - currClock(side) + inc
+ * If base/inc are null (daily), produce empty string for Move Times. Always
+ * produce Clock Seconds if clocks are available.
+ * @param {Array<{color:string, clockSeconds:number}>} parsedMoves
+ * @param {number|null} baseSeconds
+ * @param {number|null} incSeconds
+ * @return {{clockSecondsStr: string, moveTimesStr: string}}
+ */
+function buildClockSecondsAndMoveTimes(parsedMoves, baseSeconds, incSeconds) {
+  if (!parsedMoves || !parsedMoves.length) return { clockSecondsStr: '', moveTimesStr: '' };
+  var clkSecs = parsedMoves.map(function(m) {
+    var v = m && isFinite(m.clockSeconds) ? m.clockSeconds : NaN;
+    return isFinite(v) ? v : '';
+  });
+  var clockSecondsStr = clkSecs.length ? '{' + clkSecs.join(', ') + '}' : '';
+
+  var canComputeMoves = (baseSeconds != null && incSeconds != null);
+  if (!canComputeMoves) return { clockSecondsStr: clockSecondsStr, moveTimesStr: '' };
+
+  var lastClockByColor = { white: null, black: null };
+  var haveSeenFirstByColor = { white: false, black: false };
+  var moveDurations = [];
+  for (var i = 0; i < parsedMoves.length; i++) {
+    var m = parsedMoves[i];
+    var clr = m.color === 'black' ? 'black' : 'white';
+    var curr = isFinite(m.clockSeconds) ? m.clockSeconds : NaN;
+    var duration = '';
+    if (!haveSeenFirstByColor[clr]) {
+      if (isFinite(baseSeconds) && isFinite(curr) && isFinite(incSeconds)) {
+        duration = (baseSeconds - curr + incSeconds);
+      }
+      haveSeenFirstByColor[clr] = true;
+    } else {
+      var prev = lastClockByColor[clr];
+      if (isFinite(prev) && isFinite(curr) && isFinite(incSeconds)) {
+        duration = (prev - curr + incSeconds);
+      }
+    }
+    moveDurations.push(duration);
+    lastClockByColor[clr] = isFinite(curr) ? curr : lastClockByColor[clr];
+  }
+  var moveTimesStr = moveDurations.length ? '{' + moveDurations.join(', ') + '}' : '';
+  return { clockSecondsStr: clockSecondsStr, moveTimesStr: moveTimesStr };
+}
+
+/**
  * Backfills missing "Moves (SAN)" and "Clocks" for existing rows by
  * querying https://www.chess.com/callback/live/game/{game-id}.
  * Optionally provide a limit of how many missing rows to process this run.
@@ -578,6 +742,12 @@ function backfillMovesAndClocks(limit) {
   var colUrl = headerToIndex['URL'] || 2;
   var colMovesSan = headerToIndex['Moves (SAN)'];
   var colClocks = headerToIndex['Clocks'];
+  var colClockSeconds = headerToIndex['Clock Seconds'];
+  var colMoveTimes = headerToIndex['Move Times'];
+  var colTimeClass = headerToIndex['Time class'];
+  var colTimeControl = headerToIndex['Time control'];
+  var colBase = headerToIndex['Base time (s)'];
+  var colInc = headerToIndex['Increment (s)'];
   if (!colMovesSan || !colClocks) return; // headers must exist
 
   var numRows = lastRow - 1;
@@ -585,6 +755,12 @@ function backfillMovesAndClocks(limit) {
   var urls = sheet.getRange(2, colUrl, numRows, 1).getValues();
   var movesSanVals = sheet.getRange(2, colMovesSan, numRows, 1).getValues();
   var clocksVals = sheet.getRange(2, colClocks, numRows, 1).getValues();
+  var clockSecondsVals = colClockSeconds ? sheet.getRange(2, colClockSeconds, numRows, 1).getValues() : null;
+  var moveTimesVals = colMoveTimes ? sheet.getRange(2, colMoveTimes, numRows, 1).getValues() : null;
+  var timeClassVals = colTimeClass ? sheet.getRange(2, colTimeClass, numRows, 1).getValues() : null;
+  var timeControlVals = colTimeControl ? sheet.getRange(2, colTimeControl, numRows, 1).getValues() : null;
+  var baseVals = colBase ? sheet.getRange(2, colBase, numRows, 1).getValues() : null;
+  var incVals = colInc ? sheet.getRange(2, colInc, numRows, 1).getValues() : null;
 
   var toProcessCount = 0;
   for (var r = 0; r < numRows; r++) {
@@ -614,14 +790,37 @@ function backfillMovesAndClocks(limit) {
     var pgn = fetchCallbackGamePgn(gid);
     if (!pgn) continue;
     var parsed = parsePgnToSanAndClocks(pgn);
-    movesSanVals[i][0] = parsed.movesSan || currentMoves;
-    clocksVals[i][0] = parsed.clocks || currentClocks;
+    var newMovesSan = parsed.movesSan || currentMoves;
+    var newClocks = parsed.clocks || currentClocks;
+    movesSanVals[i][0] = newMovesSan;
+    clocksVals[i][0] = newClocks;
+
+    // Compute derived fields if columns exist
+    if (clockSecondsVals || moveTimesVals || baseVals || incVals) {
+      var timeClass = timeClassVals ? String(timeClassVals[i][0] || '') : '';
+      var timeControl = timeControlVals ? String(timeControlVals[i][0] || '') : '';
+      var tcParsed = parseTimeControlToBaseInc(timeControl, timeClass);
+      var baseSeconds = tcParsed.baseSeconds;
+      var incSeconds = tcParsed.incrementSeconds;
+      if (baseVals) baseVals[i][0] = (baseSeconds != null ? baseSeconds : baseVals[i][0]);
+      if (incVals) incVals[i][0] = (incSeconds != null ? incSeconds : incVals[i][0]);
+
+      var movetext = extractMovetextFromPgn(pgn);
+      var parsedMoves = movetext ? splitMovesWithClocks(movetext) : [];
+      var derived = buildClockSecondsAndMoveTimes(parsedMoves, baseSeconds, incSeconds);
+      if (clockSecondsVals) clockSecondsVals[i][0] = derived.clockSecondsStr || clockSecondsVals[i][0];
+      if (moveTimesVals) moveTimesVals[i][0] = derived.moveTimesStr || moveTimesVals[i][0];
+    }
     processed++;
   }
 
   // Batch update the entire two columns at once
   sheet.getRange(2, colMovesSan, numRows, 1).setValues(movesSanVals);
   sheet.getRange(2, colClocks, numRows, 1).setValues(clocksVals);
+  if (colClockSeconds && clockSecondsVals) sheet.getRange(2, colClockSeconds, numRows, 1).setValues(clockSecondsVals);
+  if (colMoveTimes && moveTimesVals) sheet.getRange(2, colMoveTimes, numRows, 1).setValues(moveTimesVals);
+  if (colBase && baseVals) sheet.getRange(2, colBase, numRows, 1).setValues(baseVals);
+  if (colInc && incVals) sheet.getRange(2, colInc, numRows, 1).setValues(incVals);
 }
 
 /**
