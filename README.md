@@ -22,10 +22,23 @@ Create a sheet named `Games` with at least these columns:
 11. `WhiteAccuracy`
 12. `BlackAccuracy`
 13. `Result`
+14. `WhiteACPL`
+15. `BlackACPL`
+16. `WhiteBestPct`
+17. `BlackBestPct`
+18. `WhiteInaccuracies`
+19. `WhiteMistakes`
+20. `WhiteBlunders`
+21. `BlackInaccuracies`
+22. `BlackMistakes`
+23. `BlackBlunders`
+24. `WhiteMissedWins`
+25. `BlackMissedWins`
+26. `TheoryLikePly`
 
 `gs_opening_from_pgn.gs` will ensure the Opening columns (6–10) exist.
 
-### Usage: Fill Opening & Analysis Columns From PGN
+### Usage: Fill Opening, Analysis & Metrics Columns From PGN
 1. Export or fetch the analyzed PGN from Lichess and place it in column E (`AnalyzedPGN`).
 2. In Apps Script, run `updateOpeningsFromAnalyzedPgnSheet()`.
 3. The script will parse opening fields:
@@ -37,6 +50,13 @@ Create a sheet named `Games` with at least these columns:
    - `WhiteAccuracy`: from `[WhiteAccuracy "..."]`
    - `BlackAccuracy`: from `[BlackAccuracy "..."]`
    - `Result`: from `[Result "..."]` (e.g., `1-0`, `0-1`, `1/2-1/2`)
+
+   And computed metrics (from `[%eval ...]` comments):
+   - `WhiteACPL`, `BlackACPL`: average centipawn loss (approx from eval deltas)
+   - `WhiteBestPct`, `BlackBestPct`: percent of moves with loss ≤ 0.10 pawns
+   - `White/BlackInaccuracies`, `Mistakes`, `Blunders`: counts by thresholds (>0.50, >1.00, >3.00 pawns)
+   - `White/BlackMissedWins`: had ≥ +3.0 then dropped to ≤ +1.0 (heuristic)
+   - `TheoryLikePly`: longest early streak where eval near 0 and swing small (heuristic)
 
 Example mapping:
 
