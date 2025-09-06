@@ -226,8 +226,6 @@ function normalizeGame(game) {
       if (ecoMatch && ecoMatch[1]) eco = ecoMatch[1];
       var openingUrlMatch = pgn.match(/\n\[OpeningUrl\s+"([^"]+)"\]/);
       if (openingUrlMatch && openingUrlMatch[1]) openingUrl = openingUrlMatch[1];
-      // Some PGNs may not have OpeningUrl; chess.com often has a URL in the JSON opening_url
-      if (!openingUrl && game.opening_url) openingUrl = game.opening_url;
       // Extract movetext: content after the last closing bracket line of headers
       var splitIndex = pgn.lastIndexOf(']\n');
       if (splitIndex !== -1) {
@@ -240,6 +238,14 @@ function normalizeGame(game) {
     } catch (e) {
       // ignore PGN parse issues
     }
+  }
+
+  // Prefer ECO-based URL for Opening URL when ECO is available
+  if (eco) {
+    openingUrl = 'https://www.365chess.com/eco/' + encodeURIComponent(eco);
+  } else if (!openingUrl && game.opening_url) {
+    // Fallback to any opening URL provided by the source if ECO is missing
+    openingUrl = game.opening_url;
   }
 
   return {
