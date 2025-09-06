@@ -6,36 +6,12 @@ const SHEET_NAME = 'Games';
 const RECENT_ARCHIVES_TO_SCAN = 2;
 
 function setupSheet() {
-  const sheet = getOrCreateSheet();
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow([
-      'Timestamp',
-      'URL',
-      'Game ID',
-      'Rated',
-      'Time class',
-      'Time control',
-      'Rules',
-      'Format',
-      'Color',
-      'Opponent',
-      'Opponent rating',
-      'My rating',
-      'Result',
-      'Reason',
-      'FEN',
-      'Endboard URL',
-      'ECO',
-      'Opening URL',
-      'Moves (SAN)',
-      'Clocks'
-    ]);
-  }
+  ensureHeaders();
 }
 
 // Run this periodically via time-driven trigger (e.g., every 5–15 minutes)
 function syncRecentGames() {
-  const sheet = getOrCreateSheet();
+  const sheet = ensureHeaders();
   const existingUrls = loadExistingUrls(sheet);
   const archives = getArchives();
   if (!archives || archives.length === 0) return;
@@ -67,7 +43,7 @@ function syncRecentGames() {
 // One-time (or repeated) backfill of your entire archive history
 // If you have many games, this might need multiple runs due to execution time limits.
 function backfillAllGamesOnce() {
-  const sheet = getOrCreateSheet();
+  const sheet = ensureHeaders();
   const existingUrls = loadExistingUrls(sheet);
   const archives = getArchives();
   if (!archives || archives.length === 0) return;
@@ -135,6 +111,150 @@ function getOrCreateSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
+  return sheet;
+}
+
+/**
+ * Ensures the sheet exists and the header row includes the required columns.
+ * Handles legacy migrations like renaming "Moves" to "Moves (SAN)" and adding "Clocks".
+ * Also ensures "ECO" and "Opening URL" columns are present.
+ * @return {GoogleAppsScript.Spreadsheet.Sheet} The sheet reference
+ */
+function ensureHeaders() {
+  const sheet = getOrCreateSheet();
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      'Timestamp',
+      'URL',
+      'Game ID',
+      'Rated',
+      'Time class',
+      'Time control',
+      'Rules',
+      'Format',
+      'Color',
+      'Opponent',
+      'Opponent rating',
+      'My rating',
+      'Rating change',
+      'Result',
+      'Reason',
+      'FEN',
+      'Endboard URL',
+      'ECO',
+      'Opening URL',
+      'Moves (SAN)',
+      'Clocks'
+    ]);
+    return sheet;
+  }
+
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return sheet;
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // Legacy: rename "Moves" to "Moves (SAN)" and add "Clocks" after it
+  var movesSanIdx = headers.indexOf('Moves (SAN)');
+  var clocksIdx = headers.indexOf('Clocks');
+  var legacyMovesIdx = headers.indexOf('Moves');
+  if (movesSanIdx === -1 && legacyMovesIdx !== -1) {
+    sheet.getRange(1, legacyMovesIdx + 1).setValue('Moves (SAN)');
+    movesSanIdx = legacyMovesIdx;
+  }
+  if (clocksIdx === -1) {
+    var insertAfter = (movesSanIdx !== -1) ? (movesSanIdx + 1) : lastCol;
+    sheet.insertColumnsAfter(insertAfter, 1);
+    sheet.getRange(1, insertAfter + 1).setValue('Clocks');
+  }
+
+  // Ensure ECO and Opening URL exist
+  var updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var hasEco = headers.indexOf('ECO') !== -1;
+  var hasOpeningUrl = headers.indexOf('Opening URL') !== -1;
+  var toAdd = [];
+  if (!hasEco) toAdd.push('ECO');
+  if (!hasOpeningUrl) toAdd.push('Opening URL');
+  if (toAdd.length) {
+    sheet.insertColumnsAfter(updatedLastCol, toAdd.length);
+    sheet.getRange(1, updatedLastCol + 1, 1, toAdd.length).setValues([toAdd]);
+  }
+
+  // Ensure Rating change exists; prefer to insert after "My rating"
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var ratingChangeIdx = headers.indexOf('Rating change');
+  if (ratingChangeIdx === -1) {
+    var myRatingIdx = headers.indexOf('My rating');
+    if (myRatingIdx !== -1) {
+      sheet.insertColumnsAfter(myRatingIdx + 1, 1);
+      sheet.getRange(1, myRatingIdx + 2).setValue('Rating change');
+    } else {
+      var last = sheet.getLastColumn();
+      sheet.insertColumnsAfter(last, 1);
+      sheet.getRange(1, last + 1).setValue('Rating change');
+    }
+  }
+
+  // Ensure Moves (SAN) and Clocks exist if sheet had neither
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  if (headers.indexOf('Moves (SAN)') === -1 || headers.indexOf('Clocks') === -1) {
+    var needMovesSan = headers.indexOf('Moves (SAN)') === -1;
+    var needClocks = headers.indexOf('Clocks') === -1;
+    var addList = [];
+    if (needMovesSan) addList.push('Moves (SAN)');
+    if (needClocks) addList.push('Clocks');
+    sheet.insertColumnsAfter(updatedLastCol, addList.length);
+    sheet.getRange(1, updatedLastCol + 1, 1, addList.length).setValues([addList]);
+  }
+
+  // Ensure additional callback-derived columns exist
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var extraHeaders = [
+    'White rating change',
+    'Black rating change',
+    'Winner color',
+    'Game end reason',
+    'Result message',
+    'Move timestamps',
+    'Move list',
+    'Last move',
+    'Base time (s)',
+    'Increment (s)',
+    'Is live game',
+    'Is abortable',
+    'Is analyzable',
+    'Is resignable',
+    'Is checkmate',
+    'Is stalemate',
+    'Is finished',
+    'Can send trophy',
+    'Changes players rating',
+    'Allow vacation',
+    'Game UUID',
+    'Turn color',
+    'Ply count',
+    'Initial setup',
+    'Type name',
+    'Opponent membership code',
+    'Opponent membership level',
+    'Opponent country',
+    'Opponent avatar URL',
+    'My membership code',
+    'My membership level'
+  ];
+  var missing = [];
+  for (var i = 0; i < extraHeaders.length; i++) {
+    if (headers.indexOf(extraHeaders[i]) === -1) missing.push(extraHeaders[i]);
+  }
+  if (missing.length) {
+    var last2 = sheet.getLastColumn();
+    sheet.insertColumnsAfter(last2, missing.length);
+    sheet.getRange(1, last2 + 1, 1, missing.length).setValues([missing]);
+  }
+
   return sheet;
 }
 
@@ -338,35 +458,7 @@ function installTriggerEvery15Minutes() {
  * If an older header had a single "Moves" column, convert it to "Moves (SAN)"
  * and insert a new "Clocks" column after it.
  */
-function ensureMovesClocksHeaders() {
-  const sheet = getOrCreateSheet();
-  const lastCol = sheet.getLastColumn();
-  if (lastCol === 0) return;
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-
-  var movesSanIdx = headers.indexOf('Moves (SAN)');
-  var clocksIdx = headers.indexOf('Clocks');
-  var legacyMovesIdx = headers.indexOf('Moves');
-
-  if (movesSanIdx !== -1 && clocksIdx !== -1) {
-    return; // already up to date
-  }
-
-  if (legacyMovesIdx !== -1) {
-    // Rename legacy "Moves" to "Moves (SAN)" and insert "Clocks" after it
-    sheet.getRange(1, legacyMovesIdx + 1).setValue('Moves (SAN)');
-    sheet.insertColumnsAfter(legacyMovesIdx + 1, 1);
-    sheet.getRange(1, legacyMovesIdx + 2).setValue('Clocks');
-    return;
-  }
-
-  // Neither new nor legacy headers found; append both at the end
-  const currentLastCol = sheet.getLastColumn();
-  sheet.insertColumnsAfter(currentLastCol, 2);
-  sheet.getRange(1, currentLastCol + 1, 1, 2).setValues([
-    ['Moves (SAN)', 'Clocks']
-  ]);
-}
+// ensureMovesClocksHeaders has been superseded by ensureHeaders()
 
 /**
  * Fetches live game callback data for a given Chess.com gameId and tries to
@@ -392,6 +484,26 @@ function fetchCallbackGamePgn(gameId) {
   var pgnMatch = text.match(/\[Event[^]*?(?:\n\n|\r\n\r\n)[^]*$/);
   if (pgnMatch && pgnMatch[0]) return String(pgnMatch[0]);
   return '';
+}
+
+/**
+ * Fetches the raw callback JSON for a given Chess.com gameId.
+ * @param {string} gameId
+ * @return {Object|null}
+ */
+function fetchCallbackGameData(gameId) {
+  if (!gameId) return null;
+  var url = 'https://www.chess.com/callback/live/game/' + encodeURIComponent(String(gameId));
+  var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200) return null;
+  var text = resp.getContentText();
+  if (!text) return null;
+  try {
+    var data = JSON.parse(text);
+    return data && typeof data === 'object' ? data : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -437,8 +549,7 @@ function parsePgnToSanAndClocks(pgn) {
  * @param {number=} limit Optional max number of rows to process
  */
 function backfillMovesAndClocks(limit) {
-  const sheet = getOrCreateSheet();
-  ensureMovesClocksHeaders();
+  const sheet = ensureHeaders();
 
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
@@ -528,7 +639,7 @@ function parseEcoAndOpeningFromPgn(pgn) {
  * @param {number=} limit Optional max number of rows to process this run
  */
 function backfillEcoAndOpening(limit) {
-  const sheet = getOrCreateSheet();
+  const sheet = ensureHeaders();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
@@ -589,12 +700,204 @@ function backfillEcoAndOpening(limit) {
 }
 
 /**
+ * Backfills various fields from the callback JSON for rows.
+ * Populates: rating deltas, winner, end reason/message, timestamps, movelist,
+ * last move, base/increment, flags, identifiers, turn color, ply count,
+ * initial setup, type name, opponent/my membership and opponent metadata.
+ *
+ * @param {number=} limit Optional max number of rows to process this run
+ */
+function backfillCallbackFields(limit) {
+  const sheet = ensureHeaders();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  // Header map
+  const lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var headerToIndex = {};
+  for (var c = 0; c < headers.length; c++) headerToIndex[headers[c]] = c + 1;
+
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+
+  // Resolve new columns
+  var colWhiteDelta = headerToIndex['White rating change'];
+  var colBlackDelta = headerToIndex['Black rating change'];
+  var colWinnerColor = headerToIndex['Winner color'];
+  var colEndReason = headerToIndex['Game end reason'];
+  var colResultMsg = headerToIndex['Result message'];
+  var colMoveTimestamps = headerToIndex['Move timestamps'];
+  var colMoveList = headerToIndex['Move list'];
+  var colLastMove = headerToIndex['Last move'];
+  var colBase = headerToIndex['Base time (s)'];
+  var colInc = headerToIndex['Increment (s)'];
+  var colIsLive = headerToIndex['Is live game'];
+  var colIsAbortable = headerToIndex['Is abortable'];
+  var colIsAnalyzable = headerToIndex['Is analyzable'];
+  var colIsResignable = headerToIndex['Is resignable'];
+  var colIsCheckmate = headerToIndex['Is checkmate'];
+  var colIsStalemate = headerToIndex['Is stalemate'];
+  var colIsFinished = headerToIndex['Is finished'];
+  var colCanSendTrophy = headerToIndex['Can send trophy'];
+  var colChangesPlayersRating = headerToIndex['Changes players rating'];
+  var colAllowVacation = headerToIndex['Allow vacation'];
+  var colUuid = headerToIndex['Game UUID'];
+  var colTurnColor = headerToIndex['Turn color'];
+  var colPlyCount = headerToIndex['Ply count'];
+  var colInitialSetup = headerToIndex['Initial setup'];
+  var colTypeName = headerToIndex['Type name'];
+  var colOppMembershipCode = headerToIndex['Opponent membership code'];
+  var colOppMembershipLevel = headerToIndex['Opponent membership level'];
+  var colOppCountry = headerToIndex['Opponent country'];
+  var colOppAvatar = headerToIndex['Opponent avatar URL'];
+  var colMyMembershipCode = headerToIndex['My membership code'];
+  var colMyMembershipLevel = headerToIndex['My membership level'];
+
+  var numRows = lastRow - 1;
+  var gameIds = sheet.getRange(2, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(2, colUrl, numRows, 1).getValues();
+
+  // Prepare arrays for batch update where columns exist
+  function initColumn(col) {
+    return col ? sheet.getRange(2, col, numRows, 1).getValues() : null;
+  }
+  var whiteDeltaVals = initColumn(colWhiteDelta);
+  var blackDeltaVals = initColumn(colBlackDelta);
+  var winnerVals = initColumn(colWinnerColor);
+  var endReasonVals = initColumn(colEndReason);
+  var resultMsgVals = initColumn(colResultMsg);
+  var tsVals = initColumn(colMoveTimestamps);
+  var moveListVals = initColumn(colMoveList);
+  var lastMoveVals = initColumn(colLastMove);
+  var baseVals = initColumn(colBase);
+  var incVals = initColumn(colInc);
+  var isLiveVals = initColumn(colIsLive);
+  var isAbortableVals = initColumn(colIsAbortable);
+  var isAnalyzableVals = initColumn(colIsAnalyzable);
+  var isResignableVals = initColumn(colIsResignable);
+  var isCheckmateVals = initColumn(colIsCheckmate);
+  var isStalemateVals = initColumn(colIsStalemate);
+  var isFinishedVals = initColumn(colIsFinished);
+  var canSendTrophyVals = initColumn(colCanSendTrophy);
+  var changesPlayersRatingVals = initColumn(colChangesPlayersRating);
+  var allowVacationVals = initColumn(colAllowVacation);
+  var uuidVals = initColumn(colUuid);
+  var turnVals = initColumn(colTurnColor);
+  var plyVals = initColumn(colPlyCount);
+  var setupVals = initColumn(colInitialSetup);
+  var typeNameVals = initColumn(colTypeName);
+  var oppMembershipCodeVals = initColumn(colOppMembershipCode);
+  var oppMembershipLevelVals = initColumn(colOppMembershipLevel);
+  var oppCountryVals = initColumn(colOppCountry);
+  var oppAvatarVals = initColumn(colOppAvatar);
+  var myMembershipCodeVals = initColumn(colMyMembershipCode);
+  var myMembershipLevelVals = initColumn(colMyMembershipLevel);
+
+  var toProcess = numRows;
+  if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
+    toProcess = Math.min(toProcess, limit);
+  }
+
+  for (var i = 0; i < numRows && i < toProcess; i++) {
+    var gid = String(gameIds[i][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[i][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var data = fetchCallbackGameData(gid);
+    if (!data || !data.game) continue;
+    var g = data.game;
+    var players = data.players || {};
+    var top = players.top || {};
+    var bottom = players.bottom || {};
+
+    if (whiteDeltaVals) whiteDeltaVals[i][0] = (g.ratingChangeWhite != null) ? g.ratingChangeWhite : whiteDeltaVals[i][0];
+    if (blackDeltaVals) blackDeltaVals[i][0] = (g.ratingChangeBlack != null) ? g.ratingChangeBlack : blackDeltaVals[i][0];
+    if (winnerVals) winnerVals[i][0] = g.colorOfWinner || winnerVals[i][0];
+    if (endReasonVals) endReasonVals[i][0] = g.gameEndReason || endReasonVals[i][0];
+    if (resultMsgVals) resultMsgVals[i][0] = g.resultMessage || resultMsgVals[i][0];
+    if (tsVals) tsVals[i][0] = g.moveTimestamps || tsVals[i][0];
+    if (moveListVals) moveListVals[i][0] = g.moveList || moveListVals[i][0];
+    if (lastMoveVals) lastMoveVals[i][0] = g.lastMove || lastMoveVals[i][0];
+    if (baseVals) baseVals[i][0] = (g.baseTime1 != null) ? g.baseTime1 : baseVals[i][0];
+    if (incVals) incVals[i][0] = (g.timeIncrement1 != null) ? g.timeIncrement1 : incVals[i][0];
+    if (isLiveVals) isLiveVals[i][0] = g.isLiveGame;
+    if (isAbortableVals) isAbortableVals[i][0] = g.isAbortable;
+    if (isAnalyzableVals) isAnalyzableVals[i][0] = g.isAnalyzable;
+    if (isResignableVals) isResignableVals[i][0] = g.isResignable;
+    if (isCheckmateVals) isCheckmateVals[i][0] = g.isCheckmate;
+    if (isStalemateVals) isStalemateVals[i][0] = g.isStalemate;
+    if (isFinishedVals) isFinishedVals[i][0] = g.isFinished;
+    if (canSendTrophyVals) canSendTrophyVals[i][0] = g.canSendTrophy;
+    if (changesPlayersRatingVals) changesPlayersRatingVals[i][0] = g.changesPlayersRating;
+    if (allowVacationVals) allowVacationVals[i][0] = g.allowVacation;
+    if (uuidVals) uuidVals[i][0] = g.uuid || uuidVals[i][0];
+    if (turnVals) turnVals[i][0] = g.turnColor || turnVals[i][0];
+    if (plyVals) plyVals[i][0] = (g.plyCount != null) ? g.plyCount : plyVals[i][0];
+    if (setupVals) setupVals[i][0] = (g.initialSetup != null) ? g.initialSetup : setupVals[i][0];
+    if (typeNameVals) typeNameVals[i][0] = g.typeName || typeNameVals[i][0];
+
+    // Opponent vs My membership based on player color in our row
+    var ourColorRange = headerToIndex['Color'] ? sheet.getRange(i + 2, headerToIndex['Color']) : null;
+    var ourColor = ourColorRange ? String(ourColorRange.getValue() || '').toLowerCase() : '';
+    var opponentObj = (ourColor === 'white') ? top : bottom; // if we were white, opponent is top (black)
+    var myObj = (ourColor === 'white') ? bottom : top;
+
+    if (oppMembershipCodeVals) oppMembershipCodeVals[i][0] = opponentObj.membershipCode || oppMembershipCodeVals[i][0];
+    if (oppMembershipLevelVals) oppMembershipLevelVals[i][0] = (opponentObj.membershipLevel != null) ? opponentObj.membershipLevel : oppMembershipLevelVals[i][0];
+    if (oppCountryVals) oppCountryVals[i][0] = opponentObj.countryName || oppCountryVals[i][0];
+    if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
+    if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
+    if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+  }
+
+  // Batch write columns that exist
+  function setCol(col, vals) {
+    if (col && vals) sheet.getRange(2, col, numRows, 1).setValues(vals);
+  }
+  setCol(colWhiteDelta, whiteDeltaVals);
+  setCol(colBlackDelta, blackDeltaVals);
+  setCol(colWinnerColor, winnerVals);
+  setCol(colEndReason, endReasonVals);
+  setCol(colResultMsg, resultMsgVals);
+  setCol(colMoveTimestamps, tsVals);
+  setCol(colMoveList, moveListVals);
+  setCol(colLastMove, lastMoveVals);
+  setCol(colBase, baseVals);
+  setCol(colInc, incVals);
+  setCol(colIsLive, isLiveVals);
+  setCol(colIsAbortable, isAbortableVals);
+  setCol(colIsAnalyzable, isAnalyzableVals);
+  setCol(colIsResignable, isResignableVals);
+  setCol(colIsCheckmate, isCheckmateVals);
+  setCol(colIsStalemate, isStalemateVals);
+  setCol(colIsFinished, isFinishedVals);
+  setCol(colCanSendTrophy, canSendTrophyVals);
+  setCol(colChangesPlayersRating, changesPlayersRatingVals);
+  setCol(colAllowVacation, allowVacationVals);
+  setCol(colUuid, uuidVals);
+  setCol(colTurnColor, turnVals);
+  setCol(colPlyCount, plyVals);
+  setCol(colInitialSetup, setupVals);
+  setCol(colTypeName, typeNameVals);
+  setCol(colOppMembershipCode, oppMembershipCodeVals);
+  setCol(colOppMembershipLevel, oppMembershipLevelVals);
+  setCol(colOppCountry, oppCountryVals);
+  setCol(colOppAvatar, oppAvatarVals);
+  setCol(colMyMembershipCode, myMembershipCodeVals);
+  setCol(colMyMembershipLevel, myMembershipLevelVals);
+}
  * Convenience: backfill both ECO/Opening and Moves/Clocks.
  * @param {number=} limit Optional max rows for each pass
  */
 function backfillAllMetadata(limit) {
   backfillEcoAndOpening(limit);
   backfillMovesAndClocks(limit);
+  backfillCallbackFields(limit);
 }
 
 /**
