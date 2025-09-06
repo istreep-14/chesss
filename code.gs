@@ -6,12 +6,12 @@ const SHEET_NAME = 'Games';
 const RECENT_ARCHIVES_TO_SCAN = 2;
 
 function setupSheet() {
-  ensureHeaders();
+  ensureSheet();
 }
 
 // Run this periodically via time-driven trigger (e.g., every 5–15 minutes)
 function syncRecentGames() {
-  const sheet = ensureHeaders();
+  const sheet = ensureSheet();
   const existingUrls = loadExistingUrls(sheet);
   const archives = getArchives();
   if (!archives || archives.length === 0) return;
@@ -43,7 +43,7 @@ function syncRecentGames() {
 // One-time (or repeated) backfill of your entire archive history
 // If you have many games, this might need multiple runs due to execution time limits.
 function backfillAllGamesOnce() {
-  const sheet = ensureHeaders();
+  const sheet = ensureSheet();
   const existingUrls = loadExistingUrls(sheet);
   const archives = getArchives();
   if (!archives || archives.length === 0) return;
@@ -107,21 +107,16 @@ function fetchJson(url) {
   }
 }
 
-function getOrCreateSheet() {
+/**
+ * Ensures the sheet exists and has all required headers (initial, legacy migrations,
+ * ECO/Opening URL, Rating change, and extended callback-derived metadata).
+ * Unified setup function for sheet creation and header management.
+ * @return {GoogleAppsScript.Spreadsheet.Sheet} The sheet reference
+ */
+function ensureSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
-  return sheet;
-}
-
-/**
- * Ensures the sheet exists and the header row includes the required columns.
- * Handles legacy migrations like renaming "Moves" to "Moves (SAN)" and adding "Clocks".
- * Also ensures "ECO" and "Opening URL" columns are present.
- * @return {GoogleAppsScript.Spreadsheet.Sheet} The sheet reference
- */
-function ensureHeaders() {
-  const sheet = getOrCreateSheet();
   if (sheet.getLastRow() === 0) {
     sheet.appendRow([
       'Timestamp',
@@ -458,7 +453,7 @@ function installTriggerEvery15Minutes() {
  * If an older header had a single "Moves" column, convert it to "Moves (SAN)"
  * and insert a new "Clocks" column after it.
  */
-// ensureMovesClocksHeaders has been superseded by ensureHeaders()
+// ensureMovesClocksHeaders has been superseded by ensureSheet()
 
 /**
  * Fetches live game callback data for a given Chess.com gameId and tries to
@@ -549,7 +544,7 @@ function parsePgnToSanAndClocks(pgn) {
  * @param {number=} limit Optional max number of rows to process
  */
 function backfillMovesAndClocks(limit) {
-  const sheet = ensureHeaders();
+  const sheet = ensureSheet();
 
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
@@ -639,7 +634,7 @@ function parseEcoAndOpeningFromPgn(pgn) {
  * @param {number=} limit Optional max number of rows to process this run
  */
 function backfillEcoAndOpening(limit) {
-  const sheet = ensureHeaders();
+  const sheet = ensureSheet();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
@@ -708,7 +703,7 @@ function backfillEcoAndOpening(limit) {
  * @param {number=} limit Optional max number of rows to process this run
  */
 function backfillCallbackFields(limit) {
-  const sheet = ensureHeaders();
+  const sheet = ensureSheet();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
