@@ -73,18 +73,57 @@ const COL = {
   OPENING_END_PLY: 68,   // Column BP
   ENDGAME_START_PLY: 69, // Column BQ
   EVAL_AT_MOVE20_MY: 70, // Column BR
-  EVAL_AT_MOVE30_MY: 71  // Column BS
+  EVAL_AT_MOVE30_MY: 71, // Column BS
+  // New insights
+  MY_CASTLED: 72,
+  MY_CASTLE_SIDE: 73,
+  MY_CASTLE_MOVE: 74,
+  OPP_CASTLED: 75,
+  OPP_CASTLE_SIDE: 76,
+  OPP_CASTLE_MOVE: 77,
+  MY_OPEN_MOVES: 78,
+  MY_MID_MOVES: 79,
+  MY_END_MOVES: 80,
+  OPP_OPEN_MOVES: 81,
+  OPP_MID_MOVES: 82,
+  OPP_END_MOVES: 83,
+  MY_OPEN_BEST: 84,
+  MY_OPEN_INACC: 85,
+  MY_OPEN_MIST: 86,
+  MY_OPEN_BLUN: 87,
+  MY_MID_BEST: 88,
+  MY_MID_INACC: 89,
+  MY_MID_MIST: 90,
+  MY_MID_BLUN: 91,
+  MY_END_BEST: 92,
+  MY_END_INACC: 93,
+  MY_END_MIST: 94,
+  MY_END_BLUN: 95,
+  OPP_OPEN_BEST: 96,
+  OPP_OPEN_INACC: 97,
+  OPP_OPEN_MIST: 98,
+  OPP_OPEN_BLUN: 99,
+  OPP_MID_BEST: 100,
+  OPP_MID_INACC: 101,
+  OPP_MID_MIST: 102,
+  OPP_MID_BLUN: 103,
+  OPP_END_BEST: 104,
+  OPP_END_INACC: 105,
+  OPP_END_MIST: 106,
+  OPP_END_BLUN: 107,
+  GAME_SHAPE: 108
 };
 
 // Ensure the header row has expected titles for the opening columns
 function ensureOpeningHeaders_() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
-  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.EVAL_AT_MOVE30_MY)).getValues()[0];
+  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.GAME_SHAPE)).getValues()[0];
 
   // Expand columns if needed
-  if (sheet.getMaxColumns() < COL.EVAL_AT_MOVE30_MY) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.EVAL_AT_MOVE30_MY - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < COL.GAME_SHAPE) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.GAME_SHAPE - sheet.getMaxColumns());
   }
 
   const expected = {
@@ -153,7 +192,44 @@ function ensureOpeningHeaders_() {
     [COL.OPENING_END_PLY - 1]: 'OpeningEndPly',
     [COL.ENDGAME_START_PLY - 1]: 'EndgameStartPly',
     [COL.EVAL_AT_MOVE20_MY - 1]: 'EvalAtMove20My',
-    [COL.EVAL_AT_MOVE30_MY - 1]: 'EvalAtMove30My'
+    [COL.EVAL_AT_MOVE30_MY - 1]: 'EvalAtMove30My',
+    [COL.MY_CASTLED - 1]: 'MyCastled',
+    [COL.MY_CASTLE_SIDE - 1]: 'MyCastleSide',
+    [COL.MY_CASTLE_MOVE - 1]: 'MyCastleMove',
+    [COL.OPP_CASTLED - 1]: 'OppCastled',
+    [COL.OPP_CASTLE_SIDE - 1]: 'OppCastleSide',
+    [COL.OPP_CASTLE_MOVE - 1]: 'OppCastleMove',
+    [COL.MY_OPEN_MOVES - 1]: 'MyOpenMoves',
+    [COL.MY_MID_MOVES - 1]: 'MyMidMoves',
+    [COL.MY_END_MOVES - 1]: 'MyEndMoves',
+    [COL.OPP_OPEN_MOVES - 1]: 'OppOpenMoves',
+    [COL.OPP_MID_MOVES - 1]: 'OppMidMoves',
+    [COL.OPP_END_MOVES - 1]: 'OppEndMoves',
+    [COL.MY_OPEN_BEST - 1]: 'MyOpenBest',
+    [COL.MY_OPEN_INACC - 1]: 'MyOpenInacc',
+    [COL.MY_OPEN_MIST - 1]: 'MyOpenMist',
+    [COL.MY_OPEN_BLUN - 1]: 'MyOpenBlun',
+    [COL.MY_MID_BEST - 1]: 'MyMidBest',
+    [COL.MY_MID_INACC - 1]: 'MyMidInacc',
+    [COL.MY_MID_MIST - 1]: 'MyMidMist',
+    [COL.MY_MID_BLUN - 1]: 'MyMidBlun',
+    [COL.MY_END_BEST - 1]: 'MyEndBest',
+    [COL.MY_END_INACC - 1]: 'MyEndInacc',
+    [COL.MY_END_MIST - 1]: 'MyEndMist',
+    [COL.MY_END_BLUN - 1]: 'MyEndBlun',
+    [COL.OPP_OPEN_BEST - 1]: 'OppOpenBest',
+    [COL.OPP_OPEN_INACC - 1]: 'OppOpenInacc',
+    [COL.OPP_OPEN_MIST - 1]: 'OppOpenMist',
+    [COL.OPP_OPEN_BLUN - 1]: 'OppOpenBlun',
+    [COL.OPP_MID_BEST - 1]: 'OppMidBest',
+    [COL.OPP_MID_INACC - 1]: 'OppMidInacc',
+    [COL.OPP_MID_MIST - 1]: 'OppMidMist',
+    [COL.OPP_MID_BLUN - 1]: 'OppMidBlun',
+    [COL.OPP_END_BEST - 1]: 'OppEndBest',
+    [COL.OPP_END_INACC - 1]: 'OppEndInacc',
+    [COL.OPP_END_MIST - 1]: 'OppEndMist',
+    [COL.OPP_END_BLUN - 1]: 'OppEndBlun',
+    [COL.GAME_SHAPE - 1]: 'GameShape'
   };
 
   let mutated = false;
@@ -172,7 +248,8 @@ function ensureOpeningHeaders_() {
 
 // Main entry: read PGN from column E and fill opening columns F-J, analysis K-M, metrics N-Z, and insights AA-AV
 function updateOpeningsFromAnalyzedPgnSheet() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
 
   ensureOpeningHeaders_();
@@ -187,7 +264,7 @@ function updateOpeningsFromAnalyzedPgnSheet() {
   const existingOpenings = sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).getValues();
   const existingAnalysis = sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).getValues();
   const existingMetrics = sheet.getRange(2, COL.WHITE_ACPL, rowCount, (COL.THEORY_LIKE_PLY - COL.WHITE_ACPL + 1)).getValues();
-  const existingInsights = sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.EVAL_AT_MOVE30_MY - COL.MY_USERNAME + 1)).getValues();
+  const existingInsights = sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.GAME_SHAPE - COL.MY_USERNAME + 1)).getValues();
 
   const openingOutputs = new Array(rowCount);
   const analysisOutputs = new Array(rowCount);
@@ -216,6 +293,9 @@ function updateOpeningsFromAnalyzedPgnSheet() {
     const timeMetrics = computeTimeMetrics_(clocks, my.side, players.initialSec);
     const phaseAcpl = computeAcplByPhase_(evals, metrics ? metrics.theoryLikePly : 0);
     const extra = computeExtraGameInsights_(pgnText, evals, my, analysis, players, clocks);
+    const phaseQual = computeMoveQualityByPhase_(evals, metrics ? metrics.theoryLikePly : 0, my.side);
+    const castleInfo = parseCastlingFromPgn_(pgnText);
+    const gameShape = classifyGameShape_(evals, metrics, extra, my.side);
     // If no opening parsed, keep existing
     if (!opening || !(opening.family || opening.variation || opening.sub1 || opening.sub2 || opening.eco)) {
       openingOutputs[i] = existingOpenings[i];
@@ -298,14 +378,56 @@ function updateOpeningsFromAnalyzedPgnSheet() {
       extra.openingEndPly != null ? extra.openingEndPly : '',
       extra.endgameStartPly != null ? extra.endgameStartPly : '',
       extra.evalAtMove20My != null ? extra.evalAtMove20My : '',
-      extra.evalAtMove30My != null ? extra.evalAtMove30My : ''
+      extra.evalAtMove30My != null ? extra.evalAtMove30My : '',
+      // Castling
+      (my.side ? (my.side === 'w' ? (castleInfo.white.castled ? 1 : 0) : (castleInfo.black.castled ? 1 : 0)) : ''),
+      (my.side ? (my.side === 'w' ? (castleInfo.white.side || '') : (castleInfo.black.side || '')) : ''),
+      (my.side ? (my.side === 'w' ? (castleInfo.white.moveNumber != null ? castleInfo.white.moveNumber : '') : (castleInfo.black.moveNumber != null ? castleInfo.black.moveNumber : '')) : ''),
+      (my.side ? (my.side === 'w' ? (castleInfo.black.castled ? 1 : 0) : (castleInfo.white.castled ? 1 : 0)) : ''),
+      (my.side ? (my.side === 'w' ? (castleInfo.black.side || '') : (castleInfo.white.side || '')) : ''),
+      (my.side ? (my.side === 'w' ? (castleInfo.black.moveNumber != null ? castleInfo.black.moveNumber : '') : (castleInfo.white.moveNumber != null ? castleInfo.white.moveNumber : '')) : ''),
+      // Phase move counts
+      (phaseQual.myOpenMoves != null ? phaseQual.myOpenMoves : ''),
+      (phaseQual.myMidMoves != null ? phaseQual.myMidMoves : ''),
+      (phaseQual.myEndMoves != null ? phaseQual.myEndMoves : ''),
+      (phaseQual.oppOpenMoves != null ? phaseQual.oppOpenMoves : ''),
+      (phaseQual.oppMidMoves != null ? phaseQual.oppMidMoves : ''),
+      (phaseQual.oppEndMoves != null ? phaseQual.oppEndMoves : ''),
+      // Per-phase quality counts (my)
+      (phaseQual.myOpenBest != null ? phaseQual.myOpenBest : ''),
+      (phaseQual.myOpenInacc != null ? phaseQual.myOpenInacc : ''),
+      (phaseQual.myOpenMist != null ? phaseQual.myOpenMist : ''),
+      (phaseQual.myOpenBlun != null ? phaseQual.myOpenBlun : ''),
+      (phaseQual.myMidBest != null ? phaseQual.myMidBest : ''),
+      (phaseQual.myMidInacc != null ? phaseQual.myMidInacc : ''),
+      (phaseQual.myMidMist != null ? phaseQual.myMidMist : ''),
+      (phaseQual.myMidBlun != null ? phaseQual.myMidBlun : ''),
+      (phaseQual.myEndBest != null ? phaseQual.myEndBest : ''),
+      (phaseQual.myEndInacc != null ? phaseQual.myEndInacc : ''),
+      (phaseQual.myEndMist != null ? phaseQual.myEndMist : ''),
+      (phaseQual.myEndBlun != null ? phaseQual.myEndBlun : ''),
+      // Per-phase quality counts (opp)
+      (phaseQual.oppOpenBest != null ? phaseQual.oppOpenBest : ''),
+      (phaseQual.oppOpenInacc != null ? phaseQual.oppOpenInacc : ''),
+      (phaseQual.oppOpenMist != null ? phaseQual.oppOpenMist : ''),
+      (phaseQual.oppOpenBlun != null ? phaseQual.oppOpenBlun : ''),
+      (phaseQual.oppMidBest != null ? phaseQual.oppMidBest : ''),
+      (phaseQual.oppMidInacc != null ? phaseQual.oppMidInacc : ''),
+      (phaseQual.oppMidMist != null ? phaseQual.oppMidMist : ''),
+      (phaseQual.oppMidBlun != null ? phaseQual.oppMidBlun : ''),
+      (phaseQual.oppEndBest != null ? phaseQual.oppEndBest : ''),
+      (phaseQual.oppEndInacc != null ? phaseQual.oppEndInacc : ''),
+      (phaseQual.oppEndMist != null ? phaseQual.oppEndMist : ''),
+      (phaseQual.oppEndBlun != null ? phaseQual.oppEndBlun : ''),
+      // Game shape
+      (gameShape || '')
     ];
   }
 
   sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).setValues(openingOutputs);
   sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).setValues(analysisOutputs);
   sheet.getRange(2, COL.WHITE_ACPL, rowCount, (COL.THEORY_LIKE_PLY - COL.WHITE_ACPL + 1)).setValues(metricsOutputs);
-  sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.OPP_ACPL_END - COL.MY_USERNAME + 1)).setValues(insightsOutputs);
+  sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.GAME_SHAPE - COL.MY_USERNAME + 1)).setValues(insightsOutputs);
 }
 
 // Extracts Opening/ECO tags and splits into family/variation/sub-variations
@@ -649,6 +771,121 @@ function computeAcplByPhase_(evals, theoryLikePly) {
     // Unknown orientation: leave nulls
   }
   return res;
+}
+
+// Compute per-phase move counts and quality buckets for my and opponent
+function computeMoveQualityByPhase_(evals, theoryLikePly, mySide) {
+  var result = {
+    myOpenMoves: null, myMidMoves: null, myEndMoves: null,
+    oppOpenMoves: null, oppMidMoves: null, oppEndMoves: null,
+    myOpenBest: null, myOpenInacc: null, myOpenMist: null, myOpenBlun: null,
+    myMidBest: null, myMidInacc: null, myMidMist: null, myMidBlun: null,
+    myEndBest: null, myEndInacc: null, myEndMist: null, myEndBlun: null,
+    oppOpenBest: null, oppOpenInacc: null, oppOpenMist: null, oppOpenBlun: null,
+    oppMidBest: null, oppMidInacc: null, oppMidMist: null, oppMidBlun: null,
+    oppEndBest: null, oppEndInacc: null, oppEndMist: null, oppEndBlun: null
+  };
+  if (!evals || !evals.length || !mySide) return result;
+
+  var openEnd = Math.max(0, theoryLikePly || 0);
+  var endStart = Math.max(openEnd, evals.length - 16);
+
+  function clamp(cp){ if (cp > 2000) return 2000; if (cp < -2000) return -2000; return cp; }
+
+  function countForRange(start, end, side){
+    var moves = 0, best = 0, inacc = 0, mist = 0, blun = 0;
+    for (var i = Math.max(1, start); i < Math.min(end, evals.length); i++) {
+      if (evals[i].side !== side) continue;
+      var before = clamp(evals[i-1].cp);
+      var after = clamp(evals[i].cp);
+      var beforePersp = (side === 'w') ? before : -before;
+      var afterPersp = (side === 'w') ? after : -after;
+      var loss = Math.max(0, beforePersp - afterPersp);
+      moves++;
+      if (loss <= 10) best++;
+      else if (loss > 50 && loss <= 100) inacc++;
+      else if (loss > 100 && loss <= 300) mist++;
+      else if (loss > 300) blun++;
+    }
+    return { moves: moves, best: best, inacc: inacc, mist: mist, blun: blun };
+  }
+
+  var wOpen = countForRange(0, openEnd, 'w');
+  var bOpen = countForRange(0, openEnd, 'b');
+  var wMid = countForRange(openEnd, endStart, 'w');
+  var bMid = countForRange(openEnd, endStart, 'b');
+  var wEnd = countForRange(endStart, evals.length, 'w');
+  var bEnd = countForRange(endStart, evals.length, 'b');
+
+  if (mySide === 'w') {
+    result.myOpenMoves = wOpen.moves; result.myMidMoves = wMid.moves; result.myEndMoves = wEnd.moves;
+    result.oppOpenMoves = bOpen.moves; result.oppMidMoves = bMid.moves; result.oppEndMoves = bEnd.moves;
+    result.myOpenBest = wOpen.best; result.myOpenInacc = wOpen.inacc; result.myOpenMist = wOpen.mist; result.myOpenBlun = wOpen.blun;
+    result.myMidBest = wMid.best; result.myMidInacc = wMid.inacc; result.myMidMist = wMid.mist; result.myMidBlun = wMid.blun;
+    result.myEndBest = wEnd.best; result.myEndInacc = wEnd.inacc; result.myEndMist = wEnd.mist; result.myEndBlun = wEnd.blun;
+    result.oppOpenBest = bOpen.best; result.oppOpenInacc = bOpen.inacc; result.oppOpenMist = bOpen.mist; result.oppOpenBlun = bOpen.blun;
+    result.oppMidBest = bMid.best; result.oppMidInacc = bMid.inacc; result.oppMidMist = bMid.mist; result.oppMidBlun = bMid.blun;
+    result.oppEndBest = bEnd.best; result.oppEndInacc = bEnd.inacc; result.oppEndMist = bEnd.mist; result.oppEndBlun = bEnd.blun;
+  } else if (mySide === 'b') {
+    result.myOpenMoves = bOpen.moves; result.myMidMoves = bMid.moves; result.myEndMoves = bEnd.moves;
+    result.oppOpenMoves = wOpen.moves; result.oppMidMoves = wMid.moves; result.oppEndMoves = wEnd.moves;
+    result.myOpenBest = bOpen.best; result.myOpenInacc = bOpen.inacc; result.myOpenMist = bOpen.mist; result.myOpenBlun = bOpen.blun;
+    result.myMidBest = bMid.best; result.myMidInacc = bMid.inacc; result.myMidMist = bMid.mist; result.myMidBlun = bMid.blun;
+    result.myEndBest = bEnd.best; result.myEndInacc = bEnd.inacc; result.myEndMist = bEnd.mist; result.myEndBlun = bEnd.blun;
+    result.oppOpenBest = wOpen.best; result.oppOpenInacc = wOpen.inacc; result.oppOpenMist = wOpen.mist; result.oppOpenBlun = wOpen.blun;
+    result.oppMidBest = wMid.best; result.oppMidInacc = wMid.inacc; result.oppMidMist = wMid.mist; result.oppMidBlun = wMid.blun;
+    result.oppEndBest = wEnd.best; result.oppEndInacc = wEnd.inacc; result.oppEndMist = wEnd.mist; result.oppEndBlun = wEnd.blun;
+  }
+  return result;
+}
+
+// Detect castling for white and black with side and move number
+function parseCastlingFromPgn_(pgnText) {
+  var body = extractMovetextFromPgn(pgnText || '') || '';
+  // Strip comments and NAGs
+  body = body.replace(/\{[^}]*\}/g, ' ').replace(/\$\d+/g, ' ');
+  var white = { castled: false, side: '', moveNumber: null };
+  var black = { castled: false, side: '', moveNumber: null };
+  var wMatch = body.match(/(\d+)\.\s*O-O(-O)?\b/);
+  if (wMatch) {
+    white.castled = true;
+    white.side = (wMatch[2] ? 'Q' : 'K');
+    white.moveNumber = parseInt(wMatch[1], 10);
+  }
+  var bMatch = body.match(/(\d+)\.\.\.\s*O-O(-O)?\b/);
+  if (bMatch) {
+    black.castled = true;
+    black.side = (bMatch[2] ? 'Q' : 'K');
+    black.moveNumber = parseInt(bMatch[1], 10);
+  }
+  return { white: white, black: black };
+}
+
+// Classify game shape from eval swings and mistake profile
+function classifyGameShape_(evals, metrics, extra, mySide) {
+  if (!evals || !evals.length || !metrics) return '';
+  var totalMist = (metrics.whiteMist || 0) + (metrics.blackMist || 0);
+  var totalBlun = (metrics.whiteBlun || 0) + (metrics.blackBlun || 0);
+  var totalInacc = (metrics.whiteInacc || 0) + (metrics.blackInacc || 0);
+  var maxSwing = extra && isFinite(extra.maxSwing) ? Number(extra.maxSwing) : 0;
+  var maxLead = extra && isFinite(extra.maxLeadMy) && isFinite(extra.minLeadMy) ? Math.max(Math.abs(extra.maxLeadMy||0), Math.abs(extra.minLeadMy||0)) : 0;
+
+  // Heuristics
+  if (maxSwing <= 60 && totalMist + totalBlun <= 2 && totalInacc <= 4) return 'smooth';
+  if (maxLead <= 120 && maxSwing <= 150 && totalBlun <= 2) return 'balanced';
+  if (maxSwing > 600 && totalBlun <= 2) return 'sudden';
+  if (maxSwing > 600 && totalBlun > 2) return 'wild';
+  if (maxSwing >= 300 && totalMist + totalBlun >= 4) return 'intense';
+  if (maxSwing >= 180 && totalMist + totalBlun >= 2) return 'sharp';
+
+  // Giveaway: early huge swing within first ~10 plies and decisive result
+  var earlyHuge = false;
+  for (var i = 1; i < Math.min(evals.length, 12); i++) {
+    var swing = Math.abs((evals[i] && evals[i-1]) ? (evals[i].cp - evals[i-1].cp) : 0);
+    if (swing > 600) { earlyHuge = true; break; }
+  }
+  if (earlyHuge) return 'giveaway';
+  return 'balanced';
 }
 
 function round1_(x) { return Math.round(x * 10) / 10; }
