@@ -37,6 +37,9 @@ const ENDBOARD_SIZE = 3; // 1..10
 // Trigger interval minutes for the installer helper
 const TRIGGER_INTERVAL_MINUTES = 15;
 
+// Elo K-factor to use for pregame formula estimation for established players
+const ELO_K_ESTABLISHED = 10;
+
 function setupSheet() {
   ensureSheet();
 }
@@ -351,8 +354,10 @@ function ensureSheet() {
   if (oppRatingIdx !== -1) {
     var oppPregameIdx = headers.indexOf('Opponent rating pregame');
     var oppChangeIdx = headers.indexOf('Opponent rating change');
+    var oppPregameFormulaIdx = headers.indexOf('Opponent rating pregame_formula');
     var toInsertOpp = [];
     if (oppPregameIdx === -1) toInsertOpp.push('Opponent rating pregame');
+    if (oppPregameFormulaIdx === -1) toInsertOpp.push('Opponent rating pregame_formula');
     if (oppChangeIdx === -1) toInsertOpp.push('Opponent rating change');
     if (toInsertOpp.length) {
       var afterOpp = oppRatingIdx + 1;
@@ -368,9 +373,11 @@ function ensureSheet() {
     var myPregameIdx = headers.indexOf('My rating pregame');
     var myChangeIdx = headers.indexOf('My rating change');
     var myPregameDerivedIdx = headers.indexOf('My rating pregame_derived');
+    var myPregameFormulaIdx = headers.indexOf('My rating pregame_formula');
     var toInsertMy = [];
     if (myPregameIdx === -1) toInsertMy.push('My rating pregame');
     if (myPregameDerivedIdx === -1) toInsertMy.push('My rating pregame_derived');
+    if (myPregameFormulaIdx === -1) toInsertMy.push('My rating pregame_formula');
     if (myChangeIdx === -1) toInsertMy.push('My rating change');
     if (toInsertMy.length) {
       var afterMy = myRatingIdx + 1;
@@ -1093,6 +1100,75 @@ function backfillEcoAndOpening(limit) {
 }
 
 /**
+ * Estimate pregame ratings using Elo with fixed K, based on postgame ratings and result.
+ * Writes to: My rating pregame_formula, Opponent rating pregame_formula.
+ * Does not overwrite existing non-empty values.
+ */
+function backfillPregameFormulaInRange(sheet, startRow, numRows, K) {
+  var headerToIndex = getHeaderToIndexMap_(sheet);
+  var colMyRating = headerToIndex['My rating'];
+  var colOppRating = headerToIndex['Opponent rating'];
+  var colResult = headerToIndex['Result'];
+  var colMyPregameF = headerToIndex['My rating pregame_formula'];
+  var colOppPregameF = headerToIndex['Opponent rating pregame_formula'];
+  if (!colMyRating || !colOppRating || !colResult || !colMyPregameF || !colOppPregameF) return 0;
+
+  function init(col) { return sheet.getRange(startRow, col, numRows, 1).getValues(); }
+  var myPostVals = init(colMyRating);
+  var oppPostVals = init(colOppRating);
+  var resultVals = init(colResult);
+  var myPreFVals = init(colMyPregameF);
+  var oppPreFVals = init(colOppPregameF);
+
+  function resultToScore(r) {
+    var s = String(r || '').toLowerCase();
+    if (s === 'won') return 1;
+    if (s === 'drew') return 0.5;
+    if (s === 'lost') return 0;
+    return null;
+  }
+
+  function estimate(RpostMe, RpostOpp, S, Kval) {
+    var sumPost = RpostMe + RpostOpp;
+    var d = RpostOpp - RpostMe; // start from post diff
+    for (var i = 0; i < 25; i++) {
+      var E = 1 / (1 + Math.pow(10, d / 400));
+      var RpreMe = RpostMe - Kval * (S - E);
+      var RpreOpp = sumPost - RpreMe;
+      var newD = RpreOpp - RpreMe;
+      if (Math.abs(newD - d) < 0.01) { d = newD; break; }
+      d = newD;
+    }
+    var E2 = 1 / (1 + Math.pow(10, d / 400));
+    var RpreMe2 = RpostMe - Kval * (S - E2);
+    var RpreOpp2 = sumPost - RpreMe2;
+    return { my: Math.round(RpreMe2), opp: Math.round(RpreOpp2) };
+  }
+
+  var wrote = 0;
+  for (var i = 0; i < numRows; i++) {
+    var haveMy = String(myPreFVals[i][0] || '').trim() !== '';
+    var haveOpp = String(oppPreFVals[i][0] || '').trim() !== '';
+    if (haveMy && haveOpp) continue;
+
+    var Rm = Number(myPostVals[i][0]);
+    var Ro = Number(oppPostVals[i][0]);
+    var S = resultToScore(resultVals[i][0]);
+    if (!isFinite(Rm) || !isFinite(Ro) || S == null) continue;
+
+    var est = estimate(Rm, Ro, S, K);
+    if (!haveMy) { myPreFVals[i][0] = est.my; wrote++; }
+    if (!haveOpp) { oppPreFVals[i][0] = est.opp; wrote++; }
+  }
+
+  if (wrote > 0) {
+    sheet.getRange(startRow, colMyPregameF, numRows, 1).setValues(myPreFVals);
+    sheet.getRange(startRow, colOppPregameF, numRows, 1).setValues(oppPreFVals);
+  }
+  return wrote;
+}
+
+/**
  * Backfills various fields from the callback JSON for rows.
  * Populates: rating deltas, winner, end reason/message, timestamps, movelist,
  * last move, base/increment, flags, identifiers, turn color, ply count,
@@ -1706,6 +1782,9 @@ function processNewRowsGrouped(startRow, numRows, options) {
 
   // Derived rating pregame_derived depends on prior rows, compute for target rows
   if (doDerived) backfillMyRatingPregameDerivedForRows(sheet, startRow, numRows);
+
+  // Formula-based pregame estimates (Elo) for established players
+  backfillPregameFormulaInRange(sheet, startRow, numRows, ELO_K_ESTABLISHED);
 }
 
 /**
@@ -1724,6 +1803,7 @@ function processAllRowsGrouped(options) {
   backfillEcoAndOpeningInRange(sheet, 2, count);
   if (doCallback) backfillCallbackFieldsInRange(sheet, 2, count);
   backfillMyRatingPregameDerivedForRows(sheet, 2, count);
+  backfillPregameFormulaInRange(sheet, 2, count, ELO_K_ESTABLISHED);
 }
 
 // ---- Helpers (range-limited variants) ----
