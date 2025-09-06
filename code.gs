@@ -6,36 +6,12 @@ const SHEET_NAME = 'Games';
 const RECENT_ARCHIVES_TO_SCAN = 2;
 
 function setupSheet() {
-  const sheet = getOrCreateSheet();
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow([
-      'Timestamp',
-      'URL',
-      'Game ID',
-      'Rated',
-      'Time class',
-      'Time control',
-      'Rules',
-      'Format',
-      'Color',
-      'Opponent',
-      'Opponent rating',
-      'My rating',
-      'Result',
-      'Reason',
-      'FEN',
-      'Endboard URL',
-      'ECO',
-      'Opening URL',
-      'Moves (SAN)',
-      'Clocks'
-    ]);
-  }
+  ensureHeaders();
 }
 
 // Run this periodically via time-driven trigger (e.g., every 5–15 minutes)
 function syncRecentGames() {
-  const sheet = getOrCreateSheet();
+  const sheet = ensureHeaders();
   const existingUrls = loadExistingUrls(sheet);
   const archives = getArchives();
   if (!archives || archives.length === 0) return;
@@ -67,7 +43,7 @@ function syncRecentGames() {
 // One-time (or repeated) backfill of your entire archive history
 // If you have many games, this might need multiple runs due to execution time limits.
 function backfillAllGamesOnce() {
-  const sheet = getOrCreateSheet();
+  const sheet = ensureHeaders();
   const existingUrls = loadExistingUrls(sheet);
   const archives = getArchives();
   if (!archives || archives.length === 0) return;
@@ -135,6 +111,87 @@ function getOrCreateSheet() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
+  return sheet;
+}
+
+/**
+ * Ensures the sheet exists and the header row includes the required columns.
+ * Handles legacy migrations like renaming "Moves" to "Moves (SAN)" and adding "Clocks".
+ * Also ensures "ECO" and "Opening URL" columns are present.
+ * @return {GoogleAppsScript.Spreadsheet.Sheet} The sheet reference
+ */
+function ensureHeaders() {
+  const sheet = getOrCreateSheet();
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      'Timestamp',
+      'URL',
+      'Game ID',
+      'Rated',
+      'Time class',
+      'Time control',
+      'Rules',
+      'Format',
+      'Color',
+      'Opponent',
+      'Opponent rating',
+      'My rating',
+      'Result',
+      'Reason',
+      'FEN',
+      'Endboard URL',
+      'ECO',
+      'Opening URL',
+      'Moves (SAN)',
+      'Clocks'
+    ]);
+    return sheet;
+  }
+
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return sheet;
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // Legacy: rename "Moves" to "Moves (SAN)" and add "Clocks" after it
+  var movesSanIdx = headers.indexOf('Moves (SAN)');
+  var clocksIdx = headers.indexOf('Clocks');
+  var legacyMovesIdx = headers.indexOf('Moves');
+  if (movesSanIdx === -1 && legacyMovesIdx !== -1) {
+    sheet.getRange(1, legacyMovesIdx + 1).setValue('Moves (SAN)');
+    movesSanIdx = legacyMovesIdx;
+  }
+  if (clocksIdx === -1) {
+    var insertAfter = (movesSanIdx !== -1) ? (movesSanIdx + 1) : lastCol;
+    sheet.insertColumnsAfter(insertAfter, 1);
+    sheet.getRange(1, insertAfter + 1).setValue('Clocks');
+  }
+
+  // Ensure ECO and Opening URL exist
+  var updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var hasEco = headers.indexOf('ECO') !== -1;
+  var hasOpeningUrl = headers.indexOf('Opening URL') !== -1;
+  var toAdd = [];
+  if (!hasEco) toAdd.push('ECO');
+  if (!hasOpeningUrl) toAdd.push('Opening URL');
+  if (toAdd.length) {
+    sheet.insertColumnsAfter(updatedLastCol, toAdd.length);
+    sheet.getRange(1, updatedLastCol + 1, 1, toAdd.length).setValues([toAdd]);
+  }
+
+  // Ensure Moves (SAN) and Clocks exist if sheet had neither
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  if (headers.indexOf('Moves (SAN)') === -1 || headers.indexOf('Clocks') === -1) {
+    var needMovesSan = headers.indexOf('Moves (SAN)') === -1;
+    var needClocks = headers.indexOf('Clocks') === -1;
+    var addList = [];
+    if (needMovesSan) addList.push('Moves (SAN)');
+    if (needClocks) addList.push('Clocks');
+    sheet.insertColumnsAfter(updatedLastCol, addList.length);
+    sheet.getRange(1, updatedLastCol + 1, 1, addList.length).setValues([addList]);
+  }
+
   return sheet;
 }
 
@@ -338,35 +395,7 @@ function installTriggerEvery15Minutes() {
  * If an older header had a single "Moves" column, convert it to "Moves (SAN)"
  * and insert a new "Clocks" column after it.
  */
-function ensureMovesClocksHeaders() {
-  const sheet = getOrCreateSheet();
-  const lastCol = sheet.getLastColumn();
-  if (lastCol === 0) return;
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-
-  var movesSanIdx = headers.indexOf('Moves (SAN)');
-  var clocksIdx = headers.indexOf('Clocks');
-  var legacyMovesIdx = headers.indexOf('Moves');
-
-  if (movesSanIdx !== -1 && clocksIdx !== -1) {
-    return; // already up to date
-  }
-
-  if (legacyMovesIdx !== -1) {
-    // Rename legacy "Moves" to "Moves (SAN)" and insert "Clocks" after it
-    sheet.getRange(1, legacyMovesIdx + 1).setValue('Moves (SAN)');
-    sheet.insertColumnsAfter(legacyMovesIdx + 1, 1);
-    sheet.getRange(1, legacyMovesIdx + 2).setValue('Clocks');
-    return;
-  }
-
-  // Neither new nor legacy headers found; append both at the end
-  const currentLastCol = sheet.getLastColumn();
-  sheet.insertColumnsAfter(currentLastCol, 2);
-  sheet.getRange(1, currentLastCol + 1, 1, 2).setValues([
-    ['Moves (SAN)', 'Clocks']
-  ]);
-}
+// ensureMovesClocksHeaders has been superseded by ensureHeaders()
 
 /**
  * Fetches live game callback data for a given Chess.com gameId and tries to
@@ -437,8 +466,7 @@ function parsePgnToSanAndClocks(pgn) {
  * @param {number=} limit Optional max number of rows to process
  */
 function backfillMovesAndClocks(limit) {
-  const sheet = getOrCreateSheet();
-  ensureMovesClocksHeaders();
+  const sheet = ensureHeaders();
 
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
@@ -528,7 +556,7 @@ function parseEcoAndOpeningFromPgn(pgn) {
  * @param {number=} limit Optional max number of rows to process this run
  */
 function backfillEcoAndOpening(limit) {
-  const sheet = getOrCreateSheet();
+  const sheet = ensureHeaders();
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
