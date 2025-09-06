@@ -215,7 +215,7 @@ function normalizeGame(game) {
   var endTime = game.end_time ? new Date(game.end_time * 1000) : new Date();
 
   // Parse PGN tags for ECO, Opening URL, and get movetext (moves)
-  var eco = '';
+  var eco = game.eco || '';
   var openingUrl = '';
   var moves = '';
   if (game.pgn) {
@@ -223,7 +223,7 @@ function normalizeGame(game) {
       var pgn = String(game.pgn);
       // Extract tags like [ECO "B01"] and [OpeningUrl "..."] or [Opening "..."]
       var ecoMatch = pgn.match(/\n\[ECO\s+"([^"]+)"\]/);
-      if (ecoMatch && ecoMatch[1]) eco = ecoMatch[1];
+      if (ecoMatch && ecoMatch[1] && !eco) eco = ecoMatch[1];
       var openingUrlMatch = pgn.match(/\n\[OpeningUrl\s+"([^"]+)"\]/);
       if (openingUrlMatch && openingUrlMatch[1]) openingUrl = openingUrlMatch[1];
       // Extract movetext: content after the last closing bracket line of headers
@@ -240,12 +240,11 @@ function normalizeGame(game) {
     }
   }
 
-  // Prefer ECO-based URL for Opening URL when ECO is available
-  if (eco) {
-    openingUrl = 'https://www.365chess.com/eco/' + encodeURIComponent(eco);
-  } else if (!openingUrl && game.opening_url) {
-    // Fallback to any opening URL provided by the source if ECO is missing
+  // Prefer Chess.com API-derived opening URL when available
+  if (game.opening_url) {
     openingUrl = game.opening_url;
+  } else if (game.eco_url) {
+    openingUrl = game.eco_url;
   }
 
   return {
