@@ -321,3 +321,71 @@ function installTriggerEvery15Minutes() {
     .everyMinutes(15)
     .create();
 }
+
+/**
+ * Splits a movetext string that contains move numbers and clock annotations
+ * like: "1. e4 {[%clk 0:02:59.9]} 1... e5 {[%clk 0:02:59.1]} 2. Nf3 {[%clk 0:02:59.1]}"
+ * into a structured list of moves.
+ *
+ * Rules:
+ * - "n." indicates White's move number n
+ * - "n..." indicates Black's move number n
+ * - Each move is followed by a clock annotation in the form {[%clk H:MM:SS(.t)?]}
+ * - The dot in the time is fractional seconds and must not be confused with move numbers
+ *
+ * @param {string} movetext Raw movetext containing numbers, SAN and {[%clk ...]} annotations
+ * @return {Array<{ moveNumber: number, color: 'white'|'black', san: string, clock: string, clockSeconds: number }>} Parsed moves
+ */
+function splitMovesWithClocks(movetext) {
+  if (!movetext || typeof movetext !== 'string') return [];
+
+  // Global regex to capture: moveNumber, (optional) "..." for black, SAN token, and clock time
+  // Example match: 1. e4 {[%clk 0:02:59.9]}
+  //                1... e5 {[%clk 0:02:59.1]}
+  var moveRegex = /(\d+)\.(\.\.)?\s*([^\s\{]+)\s*\{\s*\[%clk\s+([^\]]+)\]\s*\}/g;
+
+  var results = [];
+  var match;
+  while ((match = moveRegex.exec(movetext)) !== null) {
+    var moveNumber = parseInt(match[1], 10);
+    var isBlack = !!match[2];
+    var san = match[3];
+    var clockRaw = String(match[4]).trim();
+
+    var clockSeconds = parseClockToSeconds(clockRaw);
+
+    results.push({
+      moveNumber: isFinite(moveNumber) ? moveNumber : null,
+      color: isBlack ? 'black' : 'white',
+      san: san,
+      clock: clockRaw,
+      clockSeconds: clockSeconds
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Converts a clock string like "0:02:59.9" or "1:00:00" to seconds as a number.
+ * Accepts H:MM:SS(.t)? or MM:SS(.t)? formats.
+ * @param {string} clock
+ * @return {number} seconds (floating)
+ */
+function parseClockToSeconds(clock) {
+  if (!clock) return NaN;
+  var parts = String(clock).split(':');
+  if (parts.length < 2) return NaN;
+
+  // Parse from right: seconds (may contain fraction), minutes, optional hours
+  var secondsPart = parts.pop();
+  var minutesPart = parts.pop();
+  var hoursPart = parts.length > 0 ? parts.pop() : '0';
+
+  var seconds = parseFloat(secondsPart.replace(/[^0-9\.]/g, ''));
+  var minutes = parseInt(minutesPart, 10);
+  var hours = parseInt(hoursPart, 10);
+
+  if (!isFinite(seconds) || !isFinite(minutes) || !isFinite(hours)) return NaN;
+  return (hours * 3600) + (minutes * 60) + seconds;
+}
