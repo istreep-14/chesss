@@ -379,9 +379,13 @@ function ensureSheet() {
     var oppPregameIdx = headers.indexOf('Opponent rating pregame');
     var oppChangeIdx = headers.indexOf('Opponent rating change');
     var oppPregameFormulaIdx = headers.indexOf('Opponent rating pregame_formula');
+    var oppPregameSelectedIdx = headers.indexOf('Opponent rating pregame_selected');
+    var oppPregameSourceIdx = headers.indexOf('Opponent rating pregame_source');
     var toInsertOpp = [];
     if (oppPregameIdx === -1) toInsertOpp.push('Opponent rating pregame');
     if (oppPregameFormulaIdx === -1) toInsertOpp.push('Opponent rating pregame_formula');
+    if (oppPregameSelectedIdx === -1) toInsertOpp.push('Opponent rating pregame_selected');
+    if (oppPregameSourceIdx === -1) toInsertOpp.push('Opponent rating pregame_source');
     if (oppChangeIdx === -1) toInsertOpp.push('Opponent rating change');
     if (toInsertOpp.length) {
       var afterOpp = oppRatingIdx + 1;
@@ -398,16 +402,29 @@ function ensureSheet() {
     var myChangeIdx = headers.indexOf('My rating change');
     var myPregameDerivedIdx = headers.indexOf('My rating pregame_derived');
     var myPregameFormulaIdx = headers.indexOf('My rating pregame_formula');
+    var myPregameSelectedIdx = headers.indexOf('My rating pregame_selected');
+    var myPregameSourceIdx = headers.indexOf('My rating pregame_source');
     var toInsertMy = [];
     if (myPregameIdx === -1) toInsertMy.push('My rating pregame');
     if (myPregameDerivedIdx === -1) toInsertMy.push('My rating pregame_derived');
     if (myPregameFormulaIdx === -1) toInsertMy.push('My rating pregame_formula');
+    if (myPregameSelectedIdx === -1) toInsertMy.push('My rating pregame_selected');
+    if (myPregameSourceIdx === -1) toInsertMy.push('My rating pregame_source');
     if (myChangeIdx === -1) toInsertMy.push('My rating change');
     if (toInsertMy.length) {
       var afterMy = myRatingIdx + 1;
       sheet.insertColumnsAfter(afterMy, toInsertMy.length);
       sheet.getRange(1, afterMy + 1, 1, toInsertMy.length).setValues([toInsertMy]);
     }
+  }
+
+  // Ensure audit column for rating delta mismatch exists
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  if (headers.indexOf('Rating delta mismatch') === -1) {
+    var lastColNow = sheet.getLastColumn();
+    sheet.insertColumnsAfter(lastColNow, 1);
+    sheet.getRange(1, lastColNow + 1).setValue('Rating delta mismatch');
   }
 
   // Ensure additional callback-derived columns exist
@@ -1226,6 +1243,14 @@ function backfillCallbackFields(limit) {
   var colOppDelta = headerToIndex['Opponent rating change'];
   var colMyPregame = headerToIndex['My rating pregame'];
   var colOppPregame = headerToIndex['Opponent rating pregame'];
+  var colMyPregameDerived = headerToIndex['My rating pregame_derived'];
+  var colMyPregameFormula = headerToIndex['My rating pregame_formula'];
+  var colOppPregameFormula = headerToIndex['Opponent rating pregame_formula'];
+  var colMyPregameSelected = headerToIndex['My rating pregame_selected'];
+  var colMyPregameSource = headerToIndex['My rating pregame_source'];
+  var colOppPregameSelected = headerToIndex['Opponent rating pregame_selected'];
+  var colOppPregameSource = headerToIndex['Opponent rating pregame_source'];
+  var colDeltaMismatch = headerToIndex['Rating delta mismatch'];
   var colWinnerColor = headerToIndex['Winner color'];
   var colEndReason = headerToIndex['Game end reason'];
   var colResultMsg = headerToIndex['Result message'];
@@ -1274,6 +1299,14 @@ function backfillCallbackFields(limit) {
   var oppDeltaVals = initColumn(colOppDelta);
   var myPregameVals = initColumn(colMyPregame);
   var oppPregameVals = initColumn(colOppPregame);
+  var myPregameDerivedVals = initColumn(colMyPregameDerived);
+  var myPregameFormulaVals = initColumn(colMyPregameFormula);
+  var oppPregameFormulaVals = initColumn(colOppPregameFormula);
+  var myPregameSelectedVals = initColumn(colMyPregameSelected);
+  var myPregameSourceVals = initColumn(colMyPregameSource);
+  var oppPregameSelectedVals = initColumn(colOppPregameSelected);
+  var oppPregameSourceVals = initColumn(colOppPregameSource);
+  var deltaMismatchVals = initColumn(colDeltaMismatch);
   var resultValueVals = initColumn(colResultValue);
   var winnerVals = initColumn(colWinnerColor);
   var endReasonVals = initColumn(colEndReason);
@@ -1397,6 +1430,37 @@ function backfillCallbackFields(limit) {
     if (myPregameVals && String(myPregameVals[i][0] || '').trim() === '' && myPre !== '') { myPregameVals[i][0] = myPre; wrote = true; }
     if (oppPregameVals && String(oppPregameVals[i][0] || '').trim() === '' && oppPre !== '') { oppPregameVals[i][0] = oppPre; wrote = true; }
 
+    // Compute selected pregame ratings and sources
+    var myCb = myPregameVals ? Number(myPregameVals[i][0]) : NaN;
+    var myLast = myPregameDerivedVals ? Number(myPregameDerivedVals[i][0]) : NaN;
+    var myEst = myPregameFormulaVals ? Number(myPregameFormulaVals[i][0]) : NaN;
+    var selMy = '';
+    var srcMy = '';
+    if (isFinite(myCb)) { selMy = myCb; srcMy = 'cb'; }
+    else if (isFinite(myLast) && isFinite(myEst)) { selMy = (Math.abs(myLast - myEst) <= 3) ? myLast : myEst; srcMy = (Math.abs(myLast - myEst) <= 3) ? 'last' : 'est'; }
+    else if (isFinite(myEst)) { selMy = myEst; srcMy = 'est'; }
+    else if (isFinite(myLast)) { selMy = myLast; srcMy = 'last_only'; }
+    else { selMy = ''; srcMy = 'none'; }
+    if (myPregameSelectedVals && String(myPregameSelectedVals[i][0] || '').trim() === '' && selMy !== '') { myPregameSelectedVals[i][0] = selMy; wrote = true; }
+    if (myPregameSourceVals && String(myPregameSourceVals[i][0] || '').trim() === '' && srcMy) { myPregameSourceVals[i][0] = srcMy; wrote = true; }
+
+    var oppCb = oppPregameVals ? Number(oppPregameVals[i][0]) : NaN;
+    var oppEst = oppPregameFormulaVals ? Number(oppPregameFormulaVals[i][0]) : NaN;
+    var selOpp = '';
+    var srcOpp = '';
+    if (isFinite(oppCb)) { selOpp = oppCb; srcOpp = 'cb'; }
+    else if (isFinite(oppPost) && isFinite(Number(oppDelta))) { selOpp = (oppPost - Number(oppDelta)); srcOpp = 'cb_via_delta'; }
+    else if (isFinite(oppPost) && isFinite(Number(myDelta))) { selOpp = (oppPost + Number(myDelta)); srcOpp = 'derived_from_my_delta'; }
+    else if (isFinite(oppEst)) { selOpp = oppEst; srcOpp = 'formula'; }
+    else { selOpp = ''; srcOpp = 'none'; }
+    if (oppPregameSelectedVals && String(oppPregameSelectedVals[i][0] || '').trim() === '' && selOpp !== '') { oppPregameSelectedVals[i][0] = selOpp; wrote = true; }
+    if (oppPregameSourceVals && String(oppPregameSourceVals[i][0] || '').trim() === '' && srcOpp) { oppPregameSourceVals[i][0] = srcOpp; wrote = true; }
+
+    if (deltaMismatchVals && isFinite(Number(myDelta)) && isFinite(Number(oppDelta))) {
+      var sum = Number(myDelta) + Number(oppDelta);
+      if (String(deltaMismatchVals[i][0] || '').trim() === '' && sum !== 0) { deltaMismatchVals[i][0] = sum; wrote = true; }
+    }
+
     // Compute Result_Value from Result text
     if (resultValueVals && resultVals) {
       var r = String(resultVals[i][0] || '').toLowerCase();
@@ -1417,6 +1481,11 @@ function backfillCallbackFields(limit) {
   setCol(colOppDelta, oppDeltaVals);
   setCol(colMyPregame, myPregameVals);
   setCol(colOppPregame, oppPregameVals);
+  setCol(colMyPregameSelected, myPregameSelectedVals);
+  setCol(colMyPregameSource, myPregameSourceVals);
+  setCol(colOppPregameSelected, oppPregameSelectedVals);
+  setCol(colOppPregameSource, oppPregameSourceVals);
+  setCol(colDeltaMismatch, deltaMismatchVals);
   setCol(colResultValue, resultValueVals);
   setCol(colWinnerColor, winnerVals);
   setCol(colEndReason, endReasonVals);
@@ -1985,8 +2054,16 @@ function backfillCallbackFieldsInRange(sheet, startRow, numRows) {
   var colOppDelta = headerToIndex['Opponent rating change'];
   var colMyPregame = headerToIndex['My rating pregame'];
   var colOppPregame = headerToIndex['Opponent rating pregame'];
+  var colMyPregameDerived = headerToIndex['My rating pregame_derived'];
+  var colMyPregameFormula = headerToIndex['My rating pregame_formula'];
+  var colOppPregameFormula = headerToIndex['Opponent rating pregame_formula'];
+  var colMyPregameSelected = headerToIndex['My rating pregame_selected'];
+  var colMyPregameSource = headerToIndex['My rating pregame_source'];
+  var colOppPregameSelected = headerToIndex['Opponent rating pregame_selected'];
+  var colOppPregameSource = headerToIndex['Opponent rating pregame_source'];
+  var colDeltaMismatch = headerToIndex['Rating delta mismatch'];
 
-  if (!colMyDelta && !colOppDelta && !colMyPregame && !colOppPregame && !colResultValue) return 0;
+  if (!colMyDelta && !colOppDelta && !colMyPregame && !colOppPregame && !colResultValue && !colMyPregameSelected && !colOppPregameSelected) return 0;
 
   function init(col) { return col ? sheet.getRange(startRow, col, numRows, 1).getValues() : null; }
   var gameIds = sheet.getRange(startRow, colGameId, numRows, 1).getValues();
@@ -2000,6 +2077,14 @@ function backfillCallbackFieldsInRange(sheet, startRow, numRows) {
   var myPregameVals = init(colMyPregame);
   var oppPregameVals = init(colOppPregame);
   var resultValueVals = init(colResultValue);
+  var myPregameDerivedVals = init(colMyPregameDerived);
+  var myPregameFormulaVals = init(colMyPregameFormula);
+  var oppPregameFormulaVals = init(colOppPregameFormula);
+  var myPregameSelectedVals = init(colMyPregameSelected);
+  var myPregameSourceVals = init(colMyPregameSource);
+  var oppPregameSelectedVals = init(colOppPregameSelected);
+  var oppPregameSourceVals = init(colOppPregameSource);
+  var deltaMismatchVals = init(colDeltaMismatch);
 
   var processed = 0;
   for (var i = 0; i < numRows; i++) {
@@ -2036,6 +2121,37 @@ function backfillCallbackFieldsInRange(sheet, startRow, numRows) {
     if (myPregameVals && String(myPregameVals[i][0] || '').trim() === '' && myPre !== '') myPregameVals[i][0] = myPre;
     if (oppPregameVals && String(oppPregameVals[i][0] || '').trim() === '' && oppPre !== '') oppPregameVals[i][0] = oppPre;
 
+    // Compute selected values
+    var myCb = myPregameVals ? Number(myPregameVals[i][0]) : NaN;
+    var myLast = myPregameDerivedVals ? Number(myPregameDerivedVals[i][0]) : NaN;
+    var myEst = myPregameFormulaVals ? Number(myPregameFormulaVals[i][0]) : NaN;
+    var selMy = '';
+    var srcMy = '';
+    if (isFinite(myCb)) { selMy = myCb; srcMy = 'cb'; }
+    else if (isFinite(myLast) && isFinite(myEst)) { selMy = (Math.abs(myLast - myEst) <= 3) ? myLast : myEst; srcMy = (Math.abs(myLast - myEst) <= 3) ? 'last' : 'est'; }
+    else if (isFinite(myEst)) { selMy = myEst; srcMy = 'est'; }
+    else if (isFinite(myLast)) { selMy = myLast; srcMy = 'last_only'; }
+    else { selMy = ''; srcMy = 'none'; }
+    if (myPregameSelectedVals && String(myPregameSelectedVals[i][0] || '').trim() === '' && selMy !== '') myPregameSelectedVals[i][0] = selMy;
+    if (myPregameSourceVals && String(myPregameSourceVals[i][0] || '').trim() === '' && srcMy) myPregameSourceVals[i][0] = srcMy;
+
+    var oppCb = oppPregameVals ? Number(oppPregameVals[i][0]) : NaN;
+    var oppEst = oppPregameFormulaVals ? Number(oppPregameFormulaVals[i][0]) : NaN;
+    var selOpp = '';
+    var srcOpp = '';
+    if (isFinite(oppCb)) { selOpp = oppCb; srcOpp = 'cb'; }
+    else if (isFinite(oppPost) && isFinite(Number(oppDelta))) { selOpp = (oppPost - Number(oppDelta)); srcOpp = 'cb_via_delta'; }
+    else if (isFinite(oppPost) && isFinite(Number(myDelta))) { selOpp = (oppPost + Number(myDelta)); srcOpp = 'derived_from_my_delta'; }
+    else if (isFinite(oppEst)) { selOpp = oppEst; srcOpp = 'formula'; }
+    else { selOpp = ''; srcOpp = 'none'; }
+    if (oppPregameSelectedVals && String(oppPregameSelectedVals[i][0] || '').trim() === '' && selOpp !== '') oppPregameSelectedVals[i][0] = selOpp;
+    if (oppPregameSourceVals && String(oppPregameSourceVals[i][0] || '').trim() === '' && srcOpp) oppPregameSourceVals[i][0] = srcOpp;
+
+    if (deltaMismatchVals && isFinite(Number(myDelta)) && isFinite(Number(oppDelta))) {
+      var sum = Number(myDelta) + Number(oppDelta);
+      if (String(deltaMismatchVals[i][0] || '').trim() === '' && sum !== 0) deltaMismatchVals[i][0] = sum;
+    }
+
     if (resultValueVals && resultVals) {
       var r = String(resultVals[i][0] || '').toLowerCase();
       var rv = (r === 'won') ? 1 : (r === 'drew') ? 0.5 : (r === 'lost') ? 0 : '';
@@ -2049,6 +2165,11 @@ function backfillCallbackFieldsInRange(sheet, startRow, numRows) {
   setCol(colOppDelta, oppDeltaVals);
   setCol(colMyPregame, myPregameVals);
   setCol(colOppPregame, oppPregameVals);
+  setCol(colMyPregameSelected, myPregameSelectedVals);
+  setCol(colMyPregameSource, myPregameSourceVals);
+  setCol(colOppPregameSelected, oppPregameSelectedVals);
+  setCol(colOppPregameSource, oppPregameSourceVals);
+  setCol(colDeltaMismatch, deltaMismatchVals);
   setCol(colResultValue, resultValueVals);
   return processed;
 }

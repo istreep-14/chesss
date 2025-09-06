@@ -78,7 +78,7 @@ const COL = {
 
 // Ensure the header row has expected titles for the opening columns
 function ensureOpeningHeaders_() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
   const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.EVAL_AT_MOVE30_MY)).getValues()[0];
 
@@ -172,7 +172,7 @@ function ensureOpeningHeaders_() {
 
 // Main entry: read PGN from column E and fill opening columns F-J, analysis K-M, metrics N-Z, and insights AA-AV
 function updateOpeningsFromAnalyzedPgnSheet() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
 
   ensureOpeningHeaders_();
@@ -462,10 +462,14 @@ function computeEvalMetrics_(evals) {
 // ======= Insights helpers =======
 
 function setMyUsernameInteractive() {
-  const username = Browser.inputBox('Enter your Lichess username (stored in Script Properties):');
-  if (username && username !== 'cancel') {
-    PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_MY_USERNAME_KEY, username.trim());
-    SpreadsheetApp.getActive().toast('Username saved.');
+  const ui = SpreadsheetApp.getUi();
+  const res = ui.prompt('Set username', 'Enter your Lichess username (stored in Script Properties):', ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() === ui.Button.OK) {
+    var username = (res.getResponseText() || '').trim();
+    if (username) {
+      PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_MY_USERNAME_KEY, username);
+      SpreadsheetApp.getActive().toast('Username saved.');
+    }
   }
 }
 
