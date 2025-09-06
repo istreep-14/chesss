@@ -9,10 +9,12 @@ const SHEET_NAME = 'Games';
 // How many recent monthly archives to scan on each sync run
 const RECENT_ARCHIVES_TO_SCAN = 2;
 
-// Backfill batch limits per run (set large to process all)
-const BACKFILL_MOVES_CLOCKS_BATCH = 200;    // for backfillMovesAndClocks()
-const BACKFILL_ECO_OPENING_BATCH = 200;     // for backfillEcoAndOpening()
-const BACKFILL_CALLBACK_FIELDS_BATCH = 200; // for backfillCallbackFields()
+// Global batch size for all batch-processing functions
+const BATCH_SIZE = 200;
+// Backfill batch limits per run (legacy vars kept for compatibility)
+const BACKFILL_MOVES_CLOCKS_BATCH = BATCH_SIZE;    // for backfillMovesAndClocks()
+const BACKFILL_ECO_OPENING_BATCH = BATCH_SIZE;     // for backfillEcoAndOpening()
+const BACKFILL_CALLBACK_FIELDS_BATCH = BATCH_SIZE; // for backfillCallbackFields()
 
 // Throttling to be gentle with APIs and Sheets writes
 const THROTTLE_APPEND_EVERY_N_ROWS = 100;   // sleep after this many buffered rows
@@ -21,6 +23,10 @@ const THROTTLE_SLEEP_MS = 200;              // ms to sleep when throttling
 // API base URLs
 const CHESS_COM_API_BASE = 'https://api.chess.com/pub';
 const CHESS_COM_CALLBACK_BASE = 'https://www.chess.com/callback';
+
+// If false, the general callback backfill will NOT write these callback-derived
+// header columns. They are handled by a dedicated function instead.
+const ENABLE_CALLBACK_HEADERS_IN_FULL_BACKFILL = false;
 
 // Endboard image settings
 const ENDBOARD_BASE_URL = 'https://www.chess.com/dynboard';
@@ -64,6 +70,58 @@ function syncRecentGames() {
   }
 
   appendRows(sheet, rowsToAppend);
+}
+
+/**
+ * Batch-ingests new games (non-callback), respecting a limit. Returns number
+ * of rows appended in this run.
+ * @param {number=} limit Optional cap on rows appended this run (defaults to BATCH_SIZE)
+ * @return {number}
+ */
+function ingestNewGamesBatch(limit) {
+  const sheet = ensureSheet();
+  const existingUrls = loadExistingUrls(sheet);
+  const archives = getArchives();
+  if (!archives || archives.length === 0) return 0;
+
+  const recentArchives = archives.slice(-RECENT_ARCHIVES_TO_SCAN);
+  const rowsToAppend = [];
+  var effectiveLimit = (typeof limit === 'number' && isFinite(limit) && limit >= 0) ? limit : BATCH_SIZE;
+
+  for (var i = 0; i < recentArchives.length; i++) {
+    var monthUrl = recentArchives[i];
+    var monthData = fetchJson(monthUrl);
+    if (!monthData || !monthData.games || monthData.games.length === 0) continue;
+
+    for (var j = 0; j < monthData.games.length; j++) {
+      if (rowsToAppend.length >= effectiveLimit) break;
+      var game = monthData.games[j];
+      if (!game || !game.url) continue;
+      if (existingUrls.has(game.url)) continue;
+
+      var normalized = normalizeGame(game);
+      if (!normalized || !normalized.isPlayerInGame) continue;
+
+      rowsToAppend.push(buildRow(normalized));
+      existingUrls.add(game.url);
+    }
+    if (rowsToAppend.length >= effectiveLimit) break;
+  }
+
+  appendRows(sheet, rowsToAppend);
+  return rowsToAppend.length;
+}
+
+/**
+ * Runs non-callback ingestion in repeated batches until no more rows are appended.
+ * Batch size is controlled by BATCH_SIZE.
+ */
+function runNonCallbackBatchToCompletion() {
+  while (true) {
+    var appended = ingestNewGamesBatch(BATCH_SIZE);
+    if (appended < BATCH_SIZE) break;
+    if (THROTTLE_APPEND_EVERY_N_ROWS > 0) Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
 }
 
 // One-time (or repeated) backfill of your entire archive history
@@ -920,6 +978,7 @@ function backfillMovesAndClocks(limit) {
   if (colMoveTimes && moveTimesVals) sheet.getRange(2, colMoveTimes, numRows, 1).setValues(moveTimesVals);
   if (colBase && baseVals) sheet.getRange(2, colBase, numRows, 1).setValues(baseVals);
   if (colInc && incVals) sheet.getRange(2, colInc, numRows, 1).setValues(incVals);
+  return processed;
 }
 
 /**
@@ -984,6 +1043,7 @@ function backfillEcoAndOpening(limit) {
     candidates = candidates.slice(0, BACKFILL_ECO_OPENING_BATCH);
   }
 
+  var processed = 0;
   for (var i = 0; i < candidates.length; i++) {
     var idx = candidates[i];
     var gid = String(gameIds[idx][0] || '').trim();
@@ -999,16 +1059,21 @@ function backfillEcoAndOpening(limit) {
     var parsed = parseEcoAndOpeningFromPgn(pgn);
 
     // Only write when empty or obviously wrong
+    var wrote = false;
     if (!String(ecos[idx][0] || '').trim() || /^https?:\/\//i.test(String(ecos[idx][0] || ''))) {
-      ecos[idx][0] = parsed.eco || ecos[idx][0];
+      var newEco = parsed.eco || ecos[idx][0];
+      if (newEco !== ecos[idx][0]) { ecos[idx][0] = newEco; wrote = true; }
     }
     if (!String(openingUrls[idx][0] || '').trim()) {
-      openingUrls[idx][0] = parsed.openingUrl || openingUrls[idx][0];
+      var newUrl = parsed.openingUrl || openingUrls[idx][0];
+      if (newUrl !== openingUrls[idx][0]) { openingUrls[idx][0] = newUrl; wrote = true; }
     }
+    if (wrote) processed++;
   }
 
   sheet.getRange(2, colEco, numRows, 1).setValues(ecos);
   sheet.getRange(2, colOpeningUrl, numRows, 1).setValues(openingUrls);
+  return processed;
 }
 
 /**
@@ -1131,6 +1196,7 @@ function backfillCallbackFields(limit) {
     toProcess = Math.min(toProcess, BACKFILL_CALLBACK_FIELDS_BATCH);
   }
 
+  var processed = 0;
   for (var i = 0; i < numRows && i < toProcess; i++) {
     var gid = String(gameIds[i][0] || '').trim();
     if (!gid) {
@@ -1147,8 +1213,10 @@ function backfillCallbackFields(limit) {
     var top = players.top || {};
     var bottom = players.bottom || {};
 
-    if (whiteDeltaVals) whiteDeltaVals[i][0] = (g.ratingChangeWhite != null) ? g.ratingChangeWhite : whiteDeltaVals[i][0];
-    if (blackDeltaVals) blackDeltaVals[i][0] = (g.ratingChangeBlack != null) ? g.ratingChangeBlack : blackDeltaVals[i][0];
+    if (ENABLE_CALLBACK_HEADERS_IN_FULL_BACKFILL) {
+      if (whiteDeltaVals) whiteDeltaVals[i][0] = (g.ratingChangeWhite != null) ? g.ratingChangeWhite : whiteDeltaVals[i][0];
+      if (blackDeltaVals) blackDeltaVals[i][0] = (g.ratingChangeBlack != null) ? g.ratingChangeBlack : blackDeltaVals[i][0];
+    }
     if (winnerVals) winnerVals[i][0] = g.colorOfWinner || winnerVals[i][0];
     if (endReasonVals) endReasonVals[i][0] = g.gameEndReason || endReasonVals[i][0];
     if (resultMsgVals) resultMsgVals[i][0] = g.resultMessage || resultMsgVals[i][0];
@@ -1178,12 +1246,14 @@ function backfillCallbackFields(limit) {
     var opponentObj = (ourColor === 'white') ? top : bottom; // if we were white, opponent is top (black)
     var myObj = (ourColor === 'white') ? bottom : top;
 
-    if (oppMembershipCodeVals) oppMembershipCodeVals[i][0] = opponentObj.membershipCode || oppMembershipCodeVals[i][0];
-    if (oppMembershipLevelVals) oppMembershipLevelVals[i][0] = (opponentObj.membershipLevel != null) ? opponentObj.membershipLevel : oppMembershipLevelVals[i][0];
-    if (oppCountryVals) oppCountryVals[i][0] = opponentObj.countryName || oppCountryVals[i][0];
-    if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
-    if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
-    if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+    if (ENABLE_CALLBACK_HEADERS_IN_FULL_BACKFILL) {
+      if (oppMembershipCodeVals) oppMembershipCodeVals[i][0] = opponentObj.membershipCode || oppMembershipCodeVals[i][0];
+      if (oppMembershipLevelVals) oppMembershipLevelVals[i][0] = (opponentObj.membershipLevel != null) ? opponentObj.membershipLevel : oppMembershipLevelVals[i][0];
+      if (oppCountryVals) oppCountryVals[i][0] = opponentObj.countryName || oppCountryVals[i][0];
+      if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
+      if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
+      if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+    }
 
     // Compute My/Opponent rating change and pregame ratings
     var myDelta = (ourColor === 'white') ? g.ratingChangeWhite : g.ratingChangeBlack;
@@ -1246,6 +1316,7 @@ function backfillCallbackFields(limit) {
   setCol(colOppAvatar, oppAvatarVals);
   setCol(colMyMembershipCode, myMembershipCodeVals);
   setCol(colMyMembershipLevel, myMembershipLevelVals);
+  return processed;
 }
 /**
  * Convenience: backfill both ECO/Opening and Moves/Clocks.
@@ -1255,6 +1326,144 @@ function backfillAllMetadata(limit) {
   backfillEcoAndOpening(limit);
   backfillMovesAndClocks(limit);
   backfillCallbackFields(limit);
+}
+
+/**
+ * Updates ONLY the dedicated callback header fields in batches:
+ *  - White rating change
+ *  - Black rating change
+ *  - Opponent membership code/level/country/avatar URL
+ *  - My membership code/level
+ * Returns number of rows processed this run.
+ * @param {number=} limit
+ * @return {number}
+ */
+function backfillCallbackHeaderFields(limit) {
+  const sheet = ensureSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+
+  const lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var headerToIndex = {};
+  for (var c = 0; c < headers.length; c++) headerToIndex[headers[c]] = c + 1;
+
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+  var colColor = headerToIndex['Color'];
+  var colWhiteDelta = headerToIndex['White rating change'];
+  var colBlackDelta = headerToIndex['Black rating change'];
+  var colOppMembershipCode = headerToIndex['Opponent membership code'];
+  var colOppMembershipLevel = headerToIndex['Opponent membership level'];
+  var colOppCountry = headerToIndex['Opponent country'];
+  var colOppAvatar = headerToIndex['Opponent avatar URL'];
+  var colMyMembershipCode = headerToIndex['My membership code'];
+  var colMyMembershipLevel = headerToIndex['My membership level'];
+
+  var numRows = lastRow - 1;
+  var gameIds = sheet.getRange(2, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(2, colUrl, numRows, 1).getValues();
+  var colors = colColor ? sheet.getRange(2, colColor, numRows, 1).getValues() : null;
+
+  function initColumn(col) { return col ? sheet.getRange(2, col, numRows, 1).getValues() : null; }
+  var whiteDeltaVals = initColumn(colWhiteDelta);
+  var blackDeltaVals = initColumn(colBlackDelta);
+  var oppMembershipCodeVals = initColumn(colOppMembershipCode);
+  var oppMembershipLevelVals = initColumn(colOppMembershipLevel);
+  var oppCountryVals = initColumn(colOppCountry);
+  var oppAvatarVals = initColumn(colOppAvatar);
+  var myMembershipCodeVals = initColumn(colMyMembershipCode);
+  var myMembershipLevelVals = initColumn(colMyMembershipLevel);
+
+  var toProcess = numRows;
+  if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
+    toProcess = Math.min(toProcess, limit);
+  } else if (typeof BATCH_SIZE === 'number' && BATCH_SIZE > 0) {
+    toProcess = Math.min(toProcess, BATCH_SIZE);
+  }
+
+  var processed = 0;
+  for (var i = 0; i < numRows && processed < toProcess; i++) {
+    var gid = String(gameIds[i][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[i][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var data = fetchCallbackGameData(gid);
+    if (!data || !data.game) continue;
+    var g = data.game;
+    var players = data.players || {};
+    var top = players.top || {};
+    var bottom = players.bottom || {};
+
+    if (whiteDeltaVals) whiteDeltaVals[i][0] = (g.ratingChangeWhite != null) ? g.ratingChangeWhite : whiteDeltaVals[i][0];
+    if (blackDeltaVals) blackDeltaVals[i][0] = (g.ratingChangeBlack != null) ? g.ratingChangeBlack : blackDeltaVals[i][0];
+
+    var ourColor = colors ? String(colors[i][0] || '').toLowerCase() : '';
+    var opponentObj = (ourColor === 'white') ? top : bottom;
+    var myObj = (ourColor === 'white') ? bottom : top;
+
+    if (oppMembershipCodeVals) oppMembershipCodeVals[i][0] = opponentObj.membershipCode || oppMembershipCodeVals[i][0];
+    if (oppMembershipLevelVals) oppMembershipLevelVals[i][0] = (opponentObj.membershipLevel != null) ? opponentObj.membershipLevel : oppMembershipLevelVals[i][0];
+    if (oppCountryVals) oppCountryVals[i][0] = opponentObj.countryName || oppCountryVals[i][0];
+    if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
+    if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
+    if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+
+    processed++;
+  }
+
+  function setCol(col, vals) { if (col && vals) sheet.getRange(2, col, numRows, 1).setValues(vals); }
+  setCol(colWhiteDelta, whiteDeltaVals);
+  setCol(colBlackDelta, blackDeltaVals);
+  setCol(colOppMembershipCode, oppMembershipCodeVals);
+  setCol(colOppMembershipLevel, oppMembershipLevelVals);
+  setCol(colOppCountry, oppCountryVals);
+  setCol(colOppAvatar, oppAvatarVals);
+  setCol(colMyMembershipCode, myMembershipCodeVals);
+  setCol(colMyMembershipLevel, myMembershipLevelVals);
+
+  return processed;
+}
+
+/**
+ * Runs the dedicated callback header-field backfill repeatedly until completion.
+ */
+function runCallbackHeadersBatchToCompletion() {
+  while (true) {
+    var processed = backfillCallbackHeaderFields(BATCH_SIZE);
+    if (processed < BATCH_SIZE) break;
+    Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
+}
+
+/**
+ * Runs remaining callback-derived metadata in repeated batches until complete.
+ * This includes Moves/Clocks, ECO/Opening URL, and other callback fields
+ * (excluding the dedicated header subset).
+ */
+function runCallbackOthersBatchToCompletion() {
+  // Moves & Clocks
+  while (true) {
+    var a = backfillMovesAndClocks(BATCH_SIZE);
+    if (a < BATCH_SIZE) break;
+    Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
+  // ECO & Opening
+  while (true) {
+    var b = backfillEcoAndOpening(BATCH_SIZE);
+    if (b < BATCH_SIZE) break;
+    Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
+  // Other callback fields (headers subset guarded by flag)
+  while (true) {
+    var c = backfillCallbackFields(BATCH_SIZE);
+    if (c < BATCH_SIZE) break;
+    Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
 }
 
 /**
