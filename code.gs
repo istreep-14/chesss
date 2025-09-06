@@ -70,10 +70,10 @@ function syncRecentGames() {
   }
 
   appendRows(sheet, rowsToAppend);
-  // Auto-populate derived rating fields for newly added rows
+  // Grouped processing for just-added rows
   if (rowsToAppend.length) {
-    backfillCallbackFields(rowsToAppend.length);
-    backfillMyRatingPregameDerived(rowsToAppend.length);
+    var startRow = (sheet.getLastRow() - rowsToAppend.length) + 1;
+    processNewRowsGrouped(startRow, rowsToAppend.length, { includeCallback: true });
   }
 }
 
@@ -114,10 +114,10 @@ function ingestNewGamesBatch(limit) {
   }
 
   appendRows(sheet, rowsToAppend);
-  // Auto-populate derived rating fields for newly added rows in this batch
+  // Grouped processing for just-added rows in this batch
   if (rowsToAppend.length) {
-    backfillCallbackFields(rowsToAppend.length);
-    backfillMyRatingPregameDerived(rowsToAppend.length);
+    var startRow = (sheet.getLastRow() - rowsToAppend.length) + 1;
+    processNewRowsGrouped(startRow, rowsToAppend.length, { includeCallback: true });
   }
   return rowsToAppend.length;
 }
@@ -170,6 +170,8 @@ function backfillAllGamesOnce() {
     appendRows(sheet, rowsToAppend);
     rowsToAppend.length = 0;
   }
+  // After a full backfill, run non-callback grouped processing for all rows
+  processAllRowsGrouped({ includeCallback: false });
 }
 
 function getArchives() {
@@ -1671,4 +1673,341 @@ function runMyRatingPregameDerivedToCompletion() {
     if (n < BATCH_SIZE) break;
     Utilities.sleep(THROTTLE_SLEEP_MS);
   }
+}
+
+// =====================
+// Grouped, range-based processors
+// =====================
+
+/**
+ * Run grouped processors for a contiguous range of rows.
+ * startRow is 1-based, and should point to the first data row (>=2).
+ * @param {number} startRow First row to process (1-based)
+ * @param {number} numRows Number of rows to process
+ * @param {{ includeCallback?: boolean, includeMovesClocks?: boolean, includeEcoOpening?: boolean, includeDerived?: boolean }} options
+ */
+function processNewRowsGrouped(startRow, numRows, options) {
+  var sheet = ensureSheet();
+  if (!isFinite(startRow) || !isFinite(numRows) || numRows <= 0) return;
+  var opts = options || {};
+  var doCallback = !!opts.includeCallback; // include callback-derived fields
+  var doMovesClocks = opts.includeMovesClocks != null ? !!opts.includeMovesClocks : true;
+  var doEcoOpening = opts.includeEcoOpening != null ? !!opts.includeEcoOpening : true;
+  var doDerived = opts.includeDerived != null ? !!opts.includeDerived : true;
+
+  // Moves & Clocks (from callback PGN) are safe and useful for recent rows
+  if (doMovesClocks) backfillMovesAndClocksInRange(sheet, startRow, numRows);
+
+  // ECO & Opening URL
+  if (doEcoOpening) backfillEcoAndOpeningInRange(sheet, startRow, numRows);
+
+  // General callback-derived fields (rating pregame/deltas, result value, etc.)
+  if (doCallback) backfillCallbackFieldsInRange(sheet, startRow, numRows);
+
+  // Derived rating pregame_derived depends on prior rows, compute for target rows
+  if (doDerived) backfillMyRatingPregameDerivedForRows(sheet, startRow, numRows);
+}
+
+/**
+ * Run grouped processors for the entire sheet. Useful after a full backfill ingest.
+ * @param {{ includeCallback?: boolean }} options
+ */
+function processAllRowsGrouped(options) {
+  var sheet = ensureSheet();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var count = lastRow - 1;
+  var opts = options || {};
+  var doCallback = !!opts.includeCallback;
+
+  backfillMovesAndClocksInRange(sheet, 2, count);
+  backfillEcoAndOpeningInRange(sheet, 2, count);
+  if (doCallback) backfillCallbackFieldsInRange(sheet, 2, count);
+  backfillMyRatingPregameDerivedForRows(sheet, 2, count);
+}
+
+// ---- Helpers (range-limited variants) ----
+
+function getHeaderToIndexMap_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return {};
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var map = {};
+  for (var c = 0; c < headers.length; c++) map[headers[c]] = c + 1;
+  return map;
+}
+
+/**
+ * Range-limited variant of backfillMovesAndClocks.
+ */
+function backfillMovesAndClocksInRange(sheet, startRow, numRows) {
+  var headerToIndex = getHeaderToIndexMap_(sheet);
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+  var colMovesSan = headerToIndex['Moves (SAN)'];
+  var colClocks = headerToIndex['Clocks'];
+  var colClockSeconds = headerToIndex['Clock Seconds'];
+  var colMoveTimes = headerToIndex['Move Times'];
+  var colTimeClass = headerToIndex['Time class'];
+  var colTimeControl = headerToIndex['Time control'];
+  var colBase = headerToIndex['Base time (s)'];
+  var colInc = headerToIndex['Increment (s)'];
+  if (!colMovesSan || !colClocks) return 0;
+
+  var gameIds = sheet.getRange(startRow, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(startRow, colUrl, numRows, 1).getValues();
+  var movesSanVals = sheet.getRange(startRow, colMovesSan, numRows, 1).getValues();
+  var clocksVals = sheet.getRange(startRow, colClocks, numRows, 1).getValues();
+  var clockSecondsVals = colClockSeconds ? sheet.getRange(startRow, colClockSeconds, numRows, 1).getValues() : null;
+  var moveTimesVals = colMoveTimes ? sheet.getRange(startRow, colMoveTimes, numRows, 1).getValues() : null;
+  var timeClassVals = colTimeClass ? sheet.getRange(startRow, colTimeClass, numRows, 1).getValues() : null;
+  var timeControlVals = colTimeControl ? sheet.getRange(startRow, colTimeControl, numRows, 1).getValues() : null;
+  var baseVals = colBase ? sheet.getRange(startRow, colBase, numRows, 1).getValues() : null;
+  var incVals = colInc ? sheet.getRange(startRow, colInc, numRows, 1).getValues() : null;
+
+  var processed = 0;
+  for (var i = 0; i < numRows; i++) {
+    var currentMoves = String(movesSanVals[i][0] || '').trim();
+    var currentClocks = String(clocksVals[i][0] || '').trim();
+    if (currentMoves && currentClocks) continue;
+
+    var gid = String(gameIds[i][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[i][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var pgn = fetchCallbackGamePgn(gid);
+    if (!pgn) continue;
+    var parsed = parsePgnToSanAndClocks(pgn);
+    var newMovesSan = parsed.movesSan || currentMoves;
+    var newClocks = parsed.clocks || currentClocks;
+    movesSanVals[i][0] = newMovesSan;
+    clocksVals[i][0] = newClocks;
+
+    if (clockSecondsVals || moveTimesVals || baseVals || incVals) {
+      var timeClass = timeClassVals ? String(timeClassVals[i][0] || '') : '';
+      var timeControl = timeControlVals ? String(timeControlVals[i][0] || '') : '';
+      var tcParsed = parseTimeControlToBaseInc(timeControl, timeClass);
+      var baseSeconds = tcParsed.baseSeconds;
+      var incSeconds = tcParsed.incrementSeconds;
+      if (baseVals) baseVals[i][0] = (baseSeconds != null ? baseSeconds : baseVals[i][0]);
+      if (incVals) incVals[i][0] = (incSeconds != null ? incSeconds : incVals[i][0]);
+
+      var movetext = extractMovetextFromPgn(pgn);
+      var parsedMoves = movetext ? splitMovesWithClocks(movetext) : [];
+      var derived = buildClockSecondsAndMoveTimes(parsedMoves, baseSeconds, incSeconds);
+      if (clockSecondsVals) clockSecondsVals[i][0] = derived.clockSecondsStr || clockSecondsVals[i][0];
+      if (moveTimesVals) moveTimesVals[i][0] = derived.moveTimesStr || moveTimesVals[i][0];
+    }
+    processed++;
+  }
+
+  sheet.getRange(startRow, colMovesSan, numRows, 1).setValues(movesSanVals);
+  sheet.getRange(startRow, colClocks, numRows, 1).setValues(clocksVals);
+  if (colClockSeconds && clockSecondsVals) sheet.getRange(startRow, colClockSeconds, numRows, 1).setValues(clockSecondsVals);
+  if (colMoveTimes && moveTimesVals) sheet.getRange(startRow, colMoveTimes, numRows, 1).setValues(moveTimesVals);
+  if (colBase && baseVals) sheet.getRange(startRow, colBase, numRows, 1).setValues(baseVals);
+  if (colInc && incVals) sheet.getRange(startRow, colInc, numRows, 1).setValues(incVals);
+  return processed;
+}
+
+/**
+ * Range-limited variant of backfillEcoAndOpening.
+ */
+function backfillEcoAndOpeningInRange(sheet, startRow, numRows) {
+  var headerToIndex = getHeaderToIndexMap_(sheet);
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+  var colEco = headerToIndex['ECO'];
+  var colOpeningUrl = headerToIndex['Opening URL'];
+  if (!colEco || !colOpeningUrl) return 0;
+
+  var gameIds = sheet.getRange(startRow, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(startRow, colUrl, numRows, 1).getValues();
+  var ecos = sheet.getRange(startRow, colEco, numRows, 1).getValues();
+  var openingUrls = sheet.getRange(startRow, colOpeningUrl, numRows, 1).getValues();
+
+  var processed = 0;
+  for (var i = 0; i < numRows; i++) {
+    var ecoVal = String(ecos[i][0] || '').trim();
+    var openVal = String(openingUrls[i][0] || '').trim();
+    var ecoLooksWrong = ecoVal && /^https?:\/\//i.test(ecoVal);
+    if (!(ecoLooksWrong || !ecoVal || !openVal)) continue;
+
+    var gid = String(gameIds[i][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[i][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var pgn = fetchCallbackGamePgn(gid);
+    if (!pgn) continue;
+    var parsed = parseEcoAndOpeningFromPgn(pgn);
+    var wrote = false;
+    if (!ecoVal || /^https?:\/\//i.test(ecoVal)) {
+      var newEco = parsed.eco || ecos[i][0];
+      if (newEco !== ecos[i][0]) { ecos[i][0] = newEco; wrote = true; }
+    }
+    if (!openVal) {
+      var newUrl = parsed.openingUrl || openingUrls[i][0];
+      if (newUrl !== openingUrls[i][0]) { openingUrls[i][0] = newUrl; wrote = true; }
+    }
+    if (wrote) processed++;
+  }
+
+  sheet.getRange(startRow, colEco, numRows, 1).setValues(ecos);
+  sheet.getRange(startRow, colOpeningUrl, numRows, 1).setValues(openingUrls);
+  return processed;
+}
+
+/**
+ * Range-limited variant of backfillCallbackFields.
+ */
+function backfillCallbackFieldsInRange(sheet, startRow, numRows) {
+  var headerToIndex = getHeaderToIndexMap_(sheet);
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+  var colColor = headerToIndex['Color'];
+  var colMyRating = headerToIndex['My rating'];
+  var colOppRating = headerToIndex['Opponent rating'];
+  var colResult = headerToIndex['Result'];
+  var colResultValue = headerToIndex['Result_Value'];
+  var colMyDelta = headerToIndex['My rating change'];
+  var colOppDelta = headerToIndex['Opponent rating change'];
+  var colMyPregame = headerToIndex['My rating pregame'];
+  var colOppPregame = headerToIndex['Opponent rating pregame'];
+
+  if (!colMyDelta && !colOppDelta && !colMyPregame && !colOppPregame && !colResultValue) return 0;
+
+  function init(col) { return col ? sheet.getRange(startRow, col, numRows, 1).getValues() : null; }
+  var gameIds = sheet.getRange(startRow, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(startRow, colUrl, numRows, 1).getValues();
+  var colors = init(colColor);
+  var myRatings = init(colMyRating);
+  var oppRatings = init(colOppRating);
+  var resultVals = init(colResult);
+  var myDeltaVals = init(colMyDelta);
+  var oppDeltaVals = init(colOppDelta);
+  var myPregameVals = init(colMyPregame);
+  var oppPregameVals = init(colOppPregame);
+  var resultValueVals = init(colResultValue);
+
+  var processed = 0;
+  for (var i = 0; i < numRows; i++) {
+    var needs = false;
+    if (myDeltaVals && String(myDeltaVals[i][0] || '').trim() === '') needs = true;
+    if (!needs && oppDeltaVals && String(oppDeltaVals[i][0] || '').trim() === '') needs = true;
+    if (!needs && myPregameVals && String(myPregameVals[i][0] || '').trim() === '') needs = true;
+    if (!needs && oppPregameVals && String(oppPregameVals[i][0] || '').trim() === '') needs = true;
+    if (!needs && resultValueVals && String(resultValueVals[i][0] || '').trim() === '') needs = true;
+    if (!needs) continue;
+
+    var gid = String(gameIds[i][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[i][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var data = fetchCallbackGameData(gid);
+    if (!data || !data.game) continue;
+    var g = data.game;
+
+    var ourColor = colors ? String(colors[i][0] || '').toLowerCase() : '';
+    var myDelta = (ourColor === 'white') ? g.ratingChangeWhite : g.ratingChangeBlack;
+    var oppDelta = (ourColor === 'white') ? g.ratingChangeBlack : g.ratingChangeWhite;
+    if (myDeltaVals && String(myDeltaVals[i][0] || '').trim() === '' && (myDelta != null)) myDeltaVals[i][0] = myDelta;
+    if (oppDeltaVals && String(oppDeltaVals[i][0] || '').trim() === '' && (oppDelta != null)) oppDeltaVals[i][0] = oppDelta;
+
+    var myPost = myRatings ? Number(myRatings[i][0]) : NaN;
+    var oppPost = oppRatings ? Number(oppRatings[i][0]) : NaN;
+    var myPre = (isFinite(myPost) && isFinite(Number(myDelta))) ? (myPost - Number(myDelta)) : '';
+    var oppPre = (isFinite(oppPost) && isFinite(Number(oppDelta))) ? (oppPost - Number(oppDelta)) : '';
+    if (myPregameVals && String(myPregameVals[i][0] || '').trim() === '' && myPre !== '') myPregameVals[i][0] = myPre;
+    if (oppPregameVals && String(oppPregameVals[i][0] || '').trim() === '' && oppPre !== '') oppPregameVals[i][0] = oppPre;
+
+    if (resultValueVals && resultVals) {
+      var r = String(resultVals[i][0] || '').toLowerCase();
+      var rv = (r === 'won') ? 1 : (r === 'drew') ? 0.5 : (r === 'lost') ? 0 : '';
+      if (String(resultValueVals[i][0] || '').trim() === '' && rv !== '') resultValueVals[i][0] = rv;
+    }
+    processed++;
+  }
+
+  function setCol(col, vals) { if (col && vals) sheet.getRange(startRow, col, numRows, 1).setValues(vals); }
+  setCol(colMyDelta, myDeltaVals);
+  setCol(colOppDelta, oppDeltaVals);
+  setCol(colMyPregame, myPregameVals);
+  setCol(colOppPregame, oppPregameVals);
+  setCol(colResultValue, resultValueVals);
+  return processed;
+}
+
+/**
+ * Fill My rating pregame_derived for only the specified rows, using global history.
+ */
+function backfillMyRatingPregameDerivedForRows(sheet, startRow, numRows) {
+  var headerToIndex = getHeaderToIndexMap_(sheet);
+  var colTimestamp = headerToIndex['Timestamp'] || 1;
+  var colFormat = headerToIndex['Format'];
+  var colMyRating = headerToIndex['My rating'];
+  var colDerived = headerToIndex['My rating pregame_derived'];
+  if (!colFormat || !colMyRating || !colDerived) return 0;
+
+  var lastRow = sheet.getLastRow();
+  var total = lastRow - 1;
+  if (total <= 0) return 0;
+
+  var tsVals = sheet.getRange(2, colTimestamp, total, 1).getValues();
+  var fmtVals = sheet.getRange(2, colFormat, total, 1).getValues();
+  var myVals = sheet.getRange(2, colMyRating, total, 1).getValues();
+  var drvVals = sheet.getRange(2, colDerived, total, 1).getValues();
+
+  var formatToRows = {};
+  for (var i = 0; i < total; i++) {
+    var f = String(fmtVals[i][0] || '').trim();
+    if (!formatToRows[f]) formatToRows[f] = [];
+    var t = tsVals[i][0];
+    var timeMs = (t instanceof Date) ? t.getTime() : (new Date(t)).getTime();
+    formatToRows[f].push({ idx: i, time: isFinite(timeMs) ? timeMs : 0 });
+  }
+  for (var key in formatToRows) {
+    formatToRows[key].sort(function(a, b) { return a.time - b.time; });
+  }
+  var formatToSortedIndexes = {};
+  for (var fKey in formatToRows) {
+    var arr = formatToRows[fKey];
+    var posByIdx = {};
+    for (var p = 0; p < arr.length; p++) posByIdx[arr[p].idx] = p;
+    formatToSortedIndexes[fKey] = posByIdx;
+  }
+
+  var updated = 0;
+  var startIdx0 = startRow - 2; // convert to 0-based index within data rows
+  for (var k = 0; k < numRows; k++) {
+    var rowIdx = startIdx0 + k;
+    if (rowIdx < 0 || rowIdx >= total) continue;
+    if (String(drvVals[rowIdx][0] || '').trim() !== '') continue;
+    var f = String(fmtVals[rowIdx][0] || '').trim();
+    var arr = formatToRows[f] || [];
+    var pos = (formatToSortedIndexes[f] && formatToSortedIndexes[f][rowIdx] != null) ? formatToSortedIndexes[f][rowIdx] : -1;
+    if (pos <= 0) continue;
+    for (var q = pos - 1; q >= 0; q--) {
+      var priorIdx = arr[q].idx;
+      var priorRating = Number(myVals[priorIdx][0]);
+      if (isFinite(priorRating)) {
+        drvVals[rowIdx][0] = priorRating;
+        updated++;
+        break;
+      }
+    }
+  }
+  if (updated > 0) sheet.getRange(2, colDerived, total, 1).setValues(drvVals);
+  return updated;
 }
