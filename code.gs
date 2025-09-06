@@ -27,7 +27,8 @@ function setupSheet() {
       'Endboard URL',
       'ECO',
       'Opening URL',
-      'Moves'
+      'Moves (SAN)',
+      'Clocks'
     ]);
   }
 }
@@ -177,7 +178,8 @@ function buildRow(details) {
     details.imageUrl,                 // Endboard URL
     details.eco || '',                // ECO
     details.openingUrl || '',         // Opening URL
-    details.moves || ''               // Moves (PGN movetext)
+    details.movesSan || '',           // Moves (SAN list)
+    details.clocks || ''              // Clocks list
   ];
 }
 
@@ -223,25 +225,43 @@ function normalizeGame(game) {
   var eco = game.eco || '';
   var openingUrl = '';
   var moves = '';
+  var movesSan = '';
+  var clocksStr = '';
   if (game.pgn) {
     try {
-      var pgn = String(game.pgn);
-      // Extract tags like [ECO "B01"] and [ECOUrl "..."]
-      var ecoMatch = pgn.match(/\n\[ECO\s+"([^"]+)"\]/);
+      var pgn = String(game.pgn).replace(/\r\n/g, '\n');
+      // Extract tags like [ECO "B01"] and [ECOUrl "..."] anchored per line
+      var ecoMatch = pgn.match(/^\[ECO\s+"([^"]+)"\]/m);
       if (ecoMatch && ecoMatch[1] && !eco) eco = ecoMatch[1];
-      var ecoUrlMatch = pgn.match(/\n\[ECOUrl\s+"([^"]+)"\]/);
+      var ecoUrlMatch = pgn.match(/^\[(?:ECOUrl|OpeningUrl)\s+"([^"]+)"\]/m);
       if (ecoUrlMatch && ecoUrlMatch[1]) openingUrl = ecoUrlMatch[1];
-      // Extract movetext: content after the last closing bracket line of headers
-      var splitIndex = pgn.lastIndexOf(']\n');
-      if (splitIndex !== -1) {
-        var afterHeaders = pgn.substring(splitIndex + 2);
-        // Remove leading newlines/spaces
+      // Extract movetext: prefer blank line after headers, else after last header closing
+      var headerEnd = pgn.indexOf('\n\n');
+      var afterHeaders = '';
+      if (headerEnd !== -1) {
+        afterHeaders = pgn.substring(headerEnd + 2);
+      } else {
+        var splitIndex = pgn.lastIndexOf(']\n');
+        if (splitIndex !== -1) afterHeaders = pgn.substring(splitIndex + 2);
+      }
+      if (afterHeaders) {
         afterHeaders = afterHeaders.replace(/^\s+/, '');
         // Remove result token at end (e.g., 1-0, 0-1, 1/2-1/2, *), if present
         moves = afterHeaders.replace(/\s+(1-0|0-1|1\/2-1\/2|\*)\s*$/m, '');
       }
     } catch (e) {
       // ignore PGN parse issues
+    }
+  }
+
+  // Build SAN and clock lists using the parser
+  if (moves) {
+    var parsed = splitMovesWithClocks(moves);
+    if (parsed && parsed.length) {
+      var sanList = parsed.map(function(m) { return m.san; });
+      var clockList = parsed.map(function(m) { return m.clock; });
+      movesSan = sanList.length ? '{' + sanList.join(', ') + '}' : '';
+      clocksStr = clockList.length ? '{' + clockList.join(', ') + '}' : '';
     }
   }
 
@@ -281,7 +301,8 @@ function normalizeGame(game) {
     imageUrl: imageUrl,
     eco: eco,
     openingUrl: openingUrl,
-    moves: moves
+    movesSan: movesSan,
+    clocks: clocksStr
   };
 }
 
