@@ -70,6 +70,11 @@ function syncRecentGames() {
   }
 
   appendRows(sheet, rowsToAppend);
+  // Auto-populate derived rating fields for newly added rows
+  if (rowsToAppend.length) {
+    backfillCallbackFields(rowsToAppend.length);
+    backfillMyRatingPregameDerived(rowsToAppend.length);
+  }
 }
 
 /**
@@ -109,6 +114,11 @@ function ingestNewGamesBatch(limit) {
   }
 
   appendRows(sheet, rowsToAppend);
+  // Auto-populate derived rating fields for newly added rows in this batch
+  if (rowsToAppend.length) {
+    backfillCallbackFields(rowsToAppend.length);
+    backfillMyRatingPregameDerived(rowsToAppend.length);
+  }
   return rowsToAppend.length;
 }
 
@@ -1193,15 +1203,27 @@ function backfillCallbackFields(limit) {
   var myMembershipCodeVals = initColumn(colMyMembershipCode);
   var myMembershipLevelVals = initColumn(colMyMembershipLevel);
 
-  var toProcess = numRows;
+  // Build candidate list: rows missing any targeted derived rating fields
+  var candidates = [];
+  for (var r = 0; r < numRows; r++) {
+    var needs = false;
+    if (myDeltaVals && String(myDeltaVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && oppDeltaVals && String(oppDeltaVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && myPregameVals && String(myPregameVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && oppPregameVals && String(oppPregameVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && resultValueVals && String(resultValueVals[r][0] || '').trim() === '') needs = true;
+    if (needs) candidates.push(r);
+  }
+
   if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
-    toProcess = Math.min(toProcess, limit);
+    candidates = candidates.slice(0, limit);
   } else if (typeof BACKFILL_CALLBACK_FIELDS_BATCH === 'number' && BACKFILL_CALLBACK_FIELDS_BATCH > 0) {
-    toProcess = Math.min(toProcess, BACKFILL_CALLBACK_FIELDS_BATCH);
+    candidates = candidates.slice(0, BACKFILL_CALLBACK_FIELDS_BATCH);
   }
 
   var processed = 0;
-  for (var i = 0; i < numRows && i < toProcess; i++) {
+  for (var k = 0; k < candidates.length; k++) {
+    var i = candidates[k];
     var gid = String(gameIds[i][0] || '').trim();
     if (!gid) {
       var url = String(urls[i][0] || '');
@@ -1217,33 +1239,34 @@ function backfillCallbackFields(limit) {
     var top = players.top || {};
     var bottom = players.bottom || {};
 
+    var wrote = false;
     if (ENABLE_CALLBACK_HEADERS_IN_FULL_BACKFILL) {
-      if (whiteDeltaVals) whiteDeltaVals[i][0] = (g.ratingChangeWhite != null) ? g.ratingChangeWhite : whiteDeltaVals[i][0];
-      if (blackDeltaVals) blackDeltaVals[i][0] = (g.ratingChangeBlack != null) ? g.ratingChangeBlack : blackDeltaVals[i][0];
+      if (whiteDeltaVals && String(whiteDeltaVals[i][0] || '').trim() === '' && (g.ratingChangeWhite != null)) { whiteDeltaVals[i][0] = g.ratingChangeWhite; wrote = true; }
+      if (blackDeltaVals && String(blackDeltaVals[i][0] || '').trim() === '' && (g.ratingChangeBlack != null)) { blackDeltaVals[i][0] = g.ratingChangeBlack; wrote = true; }
     }
-    if (winnerVals) winnerVals[i][0] = g.colorOfWinner || winnerVals[i][0];
-    if (endReasonVals) endReasonVals[i][0] = g.gameEndReason || endReasonVals[i][0];
-    if (resultMsgVals) resultMsgVals[i][0] = g.resultMessage || resultMsgVals[i][0];
-    if (tsVals) tsVals[i][0] = g.moveTimestamps || tsVals[i][0];
-    if (moveListVals) moveListVals[i][0] = g.moveList || moveListVals[i][0];
-    if (lastMoveVals) lastMoveVals[i][0] = g.lastMove || lastMoveVals[i][0];
-    if (baseVals) baseVals[i][0] = (g.baseTime1 != null) ? g.baseTime1 : baseVals[i][0];
-    if (incVals) incVals[i][0] = (g.timeIncrement1 != null) ? g.timeIncrement1 : incVals[i][0];
-    if (isLiveVals) isLiveVals[i][0] = g.isLiveGame;
-    if (isAbortableVals) isAbortableVals[i][0] = g.isAbortable;
-    if (isAnalyzableVals) isAnalyzableVals[i][0] = g.isAnalyzable;
-    if (isResignableVals) isResignableVals[i][0] = g.isResignable;
-    if (isCheckmateVals) isCheckmateVals[i][0] = g.isCheckmate;
-    if (isStalemateVals) isStalemateVals[i][0] = g.isStalemate;
-    if (isFinishedVals) isFinishedVals[i][0] = g.isFinished;
-    if (canSendTrophyVals) canSendTrophyVals[i][0] = g.canSendTrophy;
-    if (changesPlayersRatingVals) changesPlayersRatingVals[i][0] = g.changesPlayersRating;
-    if (allowVacationVals) allowVacationVals[i][0] = g.allowVacation;
-    if (uuidVals) uuidVals[i][0] = g.uuid || uuidVals[i][0];
-    if (turnVals) turnVals[i][0] = g.turnColor || turnVals[i][0];
-    if (plyVals) plyVals[i][0] = (g.plyCount != null) ? g.plyCount : plyVals[i][0];
-    if (setupVals) setupVals[i][0] = (g.initialSetup != null) ? g.initialSetup : setupVals[i][0];
-    if (typeNameVals) typeNameVals[i][0] = g.typeName || typeNameVals[i][0];
+    if (winnerVals && String(winnerVals[i][0] || '').trim() === '' && g.colorOfWinner) { winnerVals[i][0] = g.colorOfWinner; wrote = true; }
+    if (endReasonVals && String(endReasonVals[i][0] || '').trim() === '' && g.gameEndReason) { endReasonVals[i][0] = g.gameEndReason; wrote = true; }
+    if (resultMsgVals && String(resultMsgVals[i][0] || '').trim() === '' && g.resultMessage) { resultMsgVals[i][0] = g.resultMessage; wrote = true; }
+    if (tsVals && String(tsVals[i][0] || '').trim() === '' && g.moveTimestamps) { tsVals[i][0] = g.moveTimestamps; wrote = true; }
+    if (moveListVals && String(moveListVals[i][0] || '').trim() === '' && g.moveList) { moveListVals[i][0] = g.moveList; wrote = true; }
+    if (lastMoveVals && String(lastMoveVals[i][0] || '').trim() === '' && g.lastMove) { lastMoveVals[i][0] = g.lastMove; wrote = true; }
+    if (baseVals && String(baseVals[i][0] || '').trim() === '' && (g.baseTime1 != null)) { baseVals[i][0] = g.baseTime1; wrote = true; }
+    if (incVals && String(incVals[i][0] || '').trim() === '' && (g.timeIncrement1 != null)) { incVals[i][0] = g.timeIncrement1; wrote = true; }
+    if (isLiveVals && String(isLiveVals[i][0] || '').trim() === '') { isLiveVals[i][0] = g.isLiveGame; wrote = true; }
+    if (isAbortableVals && String(isAbortableVals[i][0] || '').trim() === '') { isAbortableVals[i][0] = g.isAbortable; wrote = true; }
+    if (isAnalyzableVals && String(isAnalyzableVals[i][0] || '').trim() === '') { isAnalyzableVals[i][0] = g.isAnalyzable; wrote = true; }
+    if (isResignableVals && String(isResignableVals[i][0] || '').trim() === '') { isResignableVals[i][0] = g.isResignable; wrote = true; }
+    if (isCheckmateVals && String(isCheckmateVals[i][0] || '').trim() === '') { isCheckmateVals[i][0] = g.isCheckmate; wrote = true; }
+    if (isStalemateVals && String(isStalemateVals[i][0] || '').trim() === '') { isStalemateVals[i][0] = g.isStalemate; wrote = true; }
+    if (isFinishedVals && String(isFinishedVals[i][0] || '').trim() === '') { isFinishedVals[i][0] = g.isFinished; wrote = true; }
+    if (canSendTrophyVals && String(canSendTrophyVals[i][0] || '').trim() === '') { canSendTrophyVals[i][0] = g.canSendTrophy; wrote = true; }
+    if (changesPlayersRatingVals && String(changesPlayersRatingVals[i][0] || '').trim() === '') { changesPlayersRatingVals[i][0] = g.changesPlayersRating; wrote = true; }
+    if (allowVacationVals && String(allowVacationVals[i][0] || '').trim() === '') { allowVacationVals[i][0] = g.allowVacation; wrote = true; }
+    if (uuidVals && String(uuidVals[i][0] || '').trim() === '' && g.uuid) { uuidVals[i][0] = g.uuid; wrote = true; }
+    if (turnVals && String(turnVals[i][0] || '').trim() === '' && g.turnColor) { turnVals[i][0] = g.turnColor; wrote = true; }
+    if (plyVals && String(plyVals[i][0] || '').trim() === '' && (g.plyCount != null)) { plyVals[i][0] = g.plyCount; wrote = true; }
+    if (setupVals && String(setupVals[i][0] || '').trim() === '' && (g.initialSetup != null)) { setupVals[i][0] = g.initialSetup; wrote = true; }
+    if (typeNameVals && String(typeNameVals[i][0] || '').trim() === '' && g.typeName) { typeNameVals[i][0] = g.typeName; wrote = true; }
 
     // Opponent vs My membership based on player color in our row
     var ourColor = colors ? String(colors[i][0] || '').toLowerCase() : '';
@@ -1251,33 +1274,35 @@ function backfillCallbackFields(limit) {
     var myObj = (ourColor === 'white') ? bottom : top;
 
     if (ENABLE_CALLBACK_HEADERS_IN_FULL_BACKFILL) {
-      if (oppMembershipCodeVals) oppMembershipCodeVals[i][0] = opponentObj.membershipCode || oppMembershipCodeVals[i][0];
-      if (oppMembershipLevelVals) oppMembershipLevelVals[i][0] = (opponentObj.membershipLevel != null) ? opponentObj.membershipLevel : oppMembershipLevelVals[i][0];
-      if (oppCountryVals) oppCountryVals[i][0] = opponentObj.countryName || oppCountryVals[i][0];
-      if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
-      if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
-      if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+      if (oppMembershipCodeVals && String(oppMembershipCodeVals[i][0] || '').trim() === '' && opponentObj.membershipCode) { oppMembershipCodeVals[i][0] = opponentObj.membershipCode; wrote = true; }
+      if (oppMembershipLevelVals && String(oppMembershipLevelVals[i][0] || '').trim() === '' && (opponentObj.membershipLevel != null)) { oppMembershipLevelVals[i][0] = opponentObj.membershipLevel; wrote = true; }
+      if (oppCountryVals && String(oppCountryVals[i][0] || '').trim() === '' && opponentObj.countryName) { oppCountryVals[i][0] = opponentObj.countryName; wrote = true; }
+      if (oppAvatarVals && String(oppAvatarVals[i][0] || '').trim() === '' && opponentObj.avatarUrl) { oppAvatarVals[i][0] = opponentObj.avatarUrl; wrote = true; }
+      if (myMembershipCodeVals && String(myMembershipCodeVals[i][0] || '').trim() === '' && myObj.membershipCode) { myMembershipCodeVals[i][0] = myObj.membershipCode; wrote = true; }
+      if (myMembershipLevelVals && String(myMembershipLevelVals[i][0] || '').trim() === '' && (myObj.membershipLevel != null)) { myMembershipLevelVals[i][0] = myObj.membershipLevel; wrote = true; }
     }
 
     // Compute My/Opponent rating change and pregame ratings
     var myDelta = (ourColor === 'white') ? g.ratingChangeWhite : g.ratingChangeBlack;
     var oppDelta = (ourColor === 'white') ? g.ratingChangeBlack : g.ratingChangeWhite;
-    if (myDeltaVals && (myDelta != null)) myDeltaVals[i][0] = myDelta;
-    if (oppDeltaVals && (oppDelta != null)) oppDeltaVals[i][0] = oppDelta;
+    if (myDeltaVals && String(myDeltaVals[i][0] || '').trim() === '' && (myDelta != null)) { myDeltaVals[i][0] = myDelta; wrote = true; }
+    if (oppDeltaVals && String(oppDeltaVals[i][0] || '').trim() === '' && (oppDelta != null)) { oppDeltaVals[i][0] = oppDelta; wrote = true; }
 
     var myPost = myRatings ? Number(myRatings[i][0]) : NaN;
     var oppPost = oppRatings ? Number(oppRatings[i][0]) : NaN;
     var myPre = (isFinite(myPost) && isFinite(Number(myDelta))) ? (myPost - Number(myDelta)) : '';
     var oppPre = (isFinite(oppPost) && isFinite(Number(oppDelta))) ? (oppPost - Number(oppDelta)) : '';
-    if (myPregameVals) myPregameVals[i][0] = (myPre !== '' ? myPre : myPregameVals[i][0]);
-    if (oppPregameVals) oppPregameVals[i][0] = (oppPre !== '' ? oppPre : oppPregameVals[i][0]);
+    if (myPregameVals && String(myPregameVals[i][0] || '').trim() === '' && myPre !== '') { myPregameVals[i][0] = myPre; wrote = true; }
+    if (oppPregameVals && String(oppPregameVals[i][0] || '').trim() === '' && oppPre !== '') { oppPregameVals[i][0] = oppPre; wrote = true; }
 
     // Compute Result_Value from Result text
     if (resultValueVals && resultVals) {
       var r = String(resultVals[i][0] || '').toLowerCase();
       var rv = (r === 'won') ? 1 : (r === 'drew') ? 0.5 : (r === 'lost') ? 0 : '';
-      resultValueVals[i][0] = (rv !== '' ? rv : resultValueVals[i][0]);
+      if (String(resultValueVals[i][0] || '').trim() === '' && rv !== '') { resultValueVals[i][0] = rv; wrote = true; }
     }
+
+    if (wrote) processed++;
   }
 
   // Batch write columns that exist
@@ -1471,6 +1496,17 @@ function runCallbackOthersBatchToCompletion() {
     Utilities.sleep(THROTTLE_SLEEP_MS);
   }
   // Skip ECO & Opening and other non-callback-only fields here by design
+}
+
+/**
+ * Runs the general callback-derived rating/metadata backfill repeatedly until completion.
+ */
+function runCallbackFieldsBatchToCompletion() {
+  while (true) {
+    var n = backfillCallbackFields(BATCH_SIZE);
+    if (n < BATCH_SIZE) break;
+    Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
 }
 
 /**
