@@ -132,8 +132,13 @@ function ensureSheet() {
       'Color',
       'Opponent',
       'Opponent rating',
+      'Opponent rating pregame',
+      'Opponent rating change',
       'My rating',
+      'My rating pregame',
+      'My rating change',
       'Result',
+      'Result_Value',
       'Reason',
       'FEN',
       'Endboard URL',
@@ -224,6 +229,52 @@ function ensureSheet() {
     if (toInsert2.length) {
       sheet.insertColumnsAfter(afterClocks, toInsert2.length);
       sheet.getRange(1, afterClocks + 1, 1, toInsert2.length).setValues([toInsert2]);
+    }
+  }
+
+  // Ensure Result_Value appears immediately after Result
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var resultIdx = headers.indexOf('Result');
+  if (resultIdx !== -1) {
+    var resultValueIdx = headers.indexOf('Result_Value');
+    if (resultValueIdx === -1) {
+      var afterResult = resultIdx + 1;
+      sheet.insertColumnsAfter(afterResult, 1);
+      sheet.getRange(1, afterResult + 1).setValue('Result_Value');
+    }
+  }
+
+  // Ensure rating pregame and rating change columns exist near ratings
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var oppRatingIdx = headers.indexOf('Opponent rating');
+  if (oppRatingIdx !== -1) {
+    var oppPregameIdx = headers.indexOf('Opponent rating pregame');
+    var oppChangeIdx = headers.indexOf('Opponent rating change');
+    var toInsertOpp = [];
+    if (oppPregameIdx === -1) toInsertOpp.push('Opponent rating pregame');
+    if (oppChangeIdx === -1) toInsertOpp.push('Opponent rating change');
+    if (toInsertOpp.length) {
+      var afterOpp = oppRatingIdx + 1;
+      sheet.insertColumnsAfter(afterOpp, toInsertOpp.length);
+      sheet.getRange(1, afterOpp + 1, 1, toInsertOpp.length).setValues([toInsertOpp]);
+    }
+  }
+
+  updatedLastCol = sheet.getLastColumn();
+  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
+  var myRatingIdx = headers.indexOf('My rating');
+  if (myRatingIdx !== -1) {
+    var myPregameIdx = headers.indexOf('My rating pregame');
+    var myChangeIdx = headers.indexOf('My rating change');
+    var toInsertMy = [];
+    if (myPregameIdx === -1) toInsertMy.push('My rating pregame');
+    if (myChangeIdx === -1) toInsertMy.push('My rating change');
+    if (toInsertMy.length) {
+      var afterMy = myRatingIdx + 1;
+      sheet.insertColumnsAfter(afterMy, toInsertMy.length);
+      sheet.getRange(1, afterMy + 1, 1, toInsertMy.length).setValues([toInsertMy]);
     }
   }
 
@@ -327,8 +378,13 @@ function buildRow(details) {
     details.color,                    // Color
     details.opponentUsername,         // Opponent
     details.opponentRating || '',     // Opponent rating
+    '',                               // Opponent rating pregame (backfilled)
+    '',                               // Opponent rating change (backfilled)
     details.myRating || '',           // My rating
+    '',                               // My rating pregame (backfilled)
+    '',                               // My rating change (backfilled)
     details.result,                   // Result
+    (details.resultValue != null ? details.resultValue : ''), // Result_Value
     details.reason,                   // Reason
     details.fen,                      // FEN
     details.imageUrl,                 // Endboard URL
@@ -372,6 +428,7 @@ function normalizeGame(game) {
   var format = '';
   var result = determineResult(side, opponent);
   var reason = determineReason(side, opponent);
+  var resultValue = determineResultValue(result);
 
   var fen = game.fen || '';
   var fenEncoded = encodeURIComponent(fen);
@@ -454,6 +511,7 @@ function normalizeGame(game) {
     opponentRating: opponent && opponent.rating ? opponent.rating : '',
     myRating: side && side.rating ? side.rating : '',
     result: result,
+    resultValue: resultValue,
     reason: reason,
     fen: fen,
     imageUrl: imageUrl,
@@ -466,6 +524,13 @@ function normalizeGame(game) {
     clockSeconds: clockSecondsStrFinal,
     moveTimes: moveTimesStrFinal
   };
+}
+
+function determineResultValue(result) {
+  if (result === 'won') return 1;
+  if (result === 'drew') return 0.5;
+  if (result === 'lost') return 0;
+  return '';
 }
 
 function determineResult(side, opponent) {
@@ -698,7 +763,7 @@ function buildClockSecondsAndMoveTimes(parsedMoves, baseSeconds, incSeconds) {
     var m = parsedMoves[i];
     var clr = m.color === 'black' ? 'black' : 'white';
     var curr = isFinite(m.clockSeconds) ? m.clockSeconds : NaN;
-    var duration = '';
+    var duration = NaN;
     if (!haveSeenFirstByColor[clr]) {
       if (isFinite(baseSeconds) && isFinite(curr) && isFinite(incSeconds)) {
         duration = (baseSeconds - curr + incSeconds);
@@ -710,7 +775,12 @@ function buildClockSecondsAndMoveTimes(parsedMoves, baseSeconds, incSeconds) {
         duration = (prev - curr + incSeconds);
       }
     }
-    moveDurations.push(duration);
+    if (isFinite(duration)) {
+      var rounded = Math.round(duration * 100) / 100;
+      moveDurations.push(rounded);
+    } else {
+      moveDurations.push('');
+    }
     lastClockByColor[clr] = isFinite(curr) ? curr : lastClockByColor[clr];
   }
   var moveTimesStr = moveDurations.length ? '{' + moveDurations.join(', ') + '}' : '';
@@ -931,10 +1001,19 @@ function backfillCallbackFields(limit) {
 
   var colGameId = headerToIndex['Game ID'] || 3;
   var colUrl = headerToIndex['URL'] || 2;
+  var colColor = headerToIndex['Color'];
+  var colMyRating = headerToIndex['My rating'];
+  var colOppRating = headerToIndex['Opponent rating'];
+  var colResult = headerToIndex['Result'];
+  var colResultValue = headerToIndex['Result_Value'];
 
   // Resolve new columns
   var colWhiteDelta = headerToIndex['White rating change'];
   var colBlackDelta = headerToIndex['Black rating change'];
+  var colMyDelta = headerToIndex['My rating change'];
+  var colOppDelta = headerToIndex['Opponent rating change'];
+  var colMyPregame = headerToIndex['My rating pregame'];
+  var colOppPregame = headerToIndex['Opponent rating pregame'];
   var colWinnerColor = headerToIndex['Winner color'];
   var colEndReason = headerToIndex['Game end reason'];
   var colResultMsg = headerToIndex['Result message'];
@@ -968,6 +1047,10 @@ function backfillCallbackFields(limit) {
   var numRows = lastRow - 1;
   var gameIds = sheet.getRange(2, colGameId, numRows, 1).getValues();
   var urls = sheet.getRange(2, colUrl, numRows, 1).getValues();
+  var colors = colColor ? sheet.getRange(2, colColor, numRows, 1).getValues() : null;
+  var myRatings = colMyRating ? sheet.getRange(2, colMyRating, numRows, 1).getValues() : null;
+  var oppRatings = colOppRating ? sheet.getRange(2, colOppRating, numRows, 1).getValues() : null;
+  var resultVals = colResult ? sheet.getRange(2, colResult, numRows, 1).getValues() : null;
 
   // Prepare arrays for batch update where columns exist
   function initColumn(col) {
@@ -975,6 +1058,11 @@ function backfillCallbackFields(limit) {
   }
   var whiteDeltaVals = initColumn(colWhiteDelta);
   var blackDeltaVals = initColumn(colBlackDelta);
+  var myDeltaVals = initColumn(colMyDelta);
+  var oppDeltaVals = initColumn(colOppDelta);
+  var myPregameVals = initColumn(colMyPregame);
+  var oppPregameVals = initColumn(colOppPregame);
+  var resultValueVals = initColumn(colResultValue);
   var winnerVals = initColumn(colWinnerColor);
   var endReasonVals = initColumn(colEndReason);
   var resultMsgVals = initColumn(colResultMsg);
@@ -1053,8 +1141,7 @@ function backfillCallbackFields(limit) {
     if (typeNameVals) typeNameVals[i][0] = g.typeName || typeNameVals[i][0];
 
     // Opponent vs My membership based on player color in our row
-    var ourColorRange = headerToIndex['Color'] ? sheet.getRange(i + 2, headerToIndex['Color']) : null;
-    var ourColor = ourColorRange ? String(ourColorRange.getValue() || '').toLowerCase() : '';
+    var ourColor = colors ? String(colors[i][0] || '').toLowerCase() : '';
     var opponentObj = (ourColor === 'white') ? top : bottom; // if we were white, opponent is top (black)
     var myObj = (ourColor === 'white') ? bottom : top;
 
@@ -1064,6 +1151,26 @@ function backfillCallbackFields(limit) {
     if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
     if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
     if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+
+    // Compute My/Opponent rating change and pregame ratings
+    var myDelta = (ourColor === 'white') ? g.ratingChangeWhite : g.ratingChangeBlack;
+    var oppDelta = (ourColor === 'white') ? g.ratingChangeBlack : g.ratingChangeWhite;
+    if (myDeltaVals && (myDelta != null)) myDeltaVals[i][0] = myDelta;
+    if (oppDeltaVals && (oppDelta != null)) oppDeltaVals[i][0] = oppDelta;
+
+    var myPost = myRatings ? Number(myRatings[i][0]) : NaN;
+    var oppPost = oppRatings ? Number(oppRatings[i][0]) : NaN;
+    var myPre = (isFinite(myPost) && isFinite(Number(myDelta))) ? (myPost - Number(myDelta)) : '';
+    var oppPre = (isFinite(oppPost) && isFinite(Number(oppDelta))) ? (oppPost - Number(oppDelta)) : '';
+    if (myPregameVals) myPregameVals[i][0] = (myPre !== '' ? myPre : myPregameVals[i][0]);
+    if (oppPregameVals) oppPregameVals[i][0] = (oppPre !== '' ? oppPre : oppPregameVals[i][0]);
+
+    // Compute Result_Value from Result text
+    if (resultValueVals && resultVals) {
+      var r = String(resultVals[i][0] || '').toLowerCase();
+      var rv = (r === 'won') ? 1 : (r === 'drew') ? 0.5 : (r === 'lost') ? 0 : '';
+      resultValueVals[i][0] = (rv !== '' ? rv : resultValueVals[i][0]);
+    }
   }
 
   // Batch write columns that exist
@@ -1072,6 +1179,11 @@ function backfillCallbackFields(limit) {
   }
   setCol(colWhiteDelta, whiteDeltaVals);
   setCol(colBlackDelta, blackDeltaVals);
+  setCol(colMyDelta, myDeltaVals);
+  setCol(colOppDelta, oppDeltaVals);
+  setCol(colMyPregame, myPregameVals);
+  setCol(colOppPregame, oppPregameVals);
+  setCol(colResultValue, resultValueVals);
   setCol(colWinnerColor, winnerVals);
   setCol(colEndReason, endReasonVals);
   setCol(colResultMsg, resultMsgVals);
