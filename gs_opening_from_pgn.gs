@@ -51,18 +51,41 @@ const COL = {
   MY_ACPL_END: 45,       // Column AS: MyACPL_Endgame
   OPP_ACPL_OPEN: 46,     // Column AT: OppACPL_Opening
   OPP_ACPL_MID: 47,      // Column AU: OppACPL_Midgame
-  OPP_ACPL_END: 48       // Column AV: OppACPL_Endgame
+  OPP_ACPL_END: 48,      // Column AV: OppACPL_Endgame
+  MY_RESULT_NUM: 49,     // Column AW: MyResultNum (1/0.5/0)
+  ACCURACY_DIFF: 50,     // Column AX: MyAccuracyMinusOpp
+  RATING_DIFF: 51,       // Column AY: OppRatingMinusMyRating
+  MAX_LEAD_CP_MY: 52,    // Column AZ: MaxLeadCpMy
+  MIN_LEAD_CP_MY: 53,    // Column BA: MinLeadCpMy
+  MAX_SWING_CP: 54,      // Column BB: MaxSingleMoveSwingCp
+  FIRST_INACC_PLY_MY: 55,// Column BC: FirstInaccPlyMy
+  FIRST_MIST_PLY_MY: 56, // Column BD: FirstMistPlyMy
+  FIRST_BLUN_PLY_MY: 57, // Column BE: FirstBlunPlyMy
+  FIRST_INACC_PLY_OPP: 58,// Column BF: FirstInaccPlyOpp
+  FIRST_MIST_PLY_OPP: 59,// Column BG: FirstMistPlyOpp
+  FIRST_BLUN_PLY_OPP: 60,// Column BH: FirstBlunPlyOpp
+  COMEBACK: 61,          // Column BI: Comeback (1/0)
+  CONVERSION: 62,        // Column BJ: Conversion (1/0)
+  SAVE: 63,              // Column BK: Save (1/0)
+  ADV_TIME_MY: 64,       // Column BL: AdvantageTimeSecMy (>= +50cp)
+  ADV_TIME_OPP: 65,      // Column BM: AdvantageTimeSecOpp
+  MAX_BLUNDER_STREAK_MY: 66, // Column BN
+  MAX_BLUNDER_STREAK_OPP: 67, // Column BO
+  OPENING_END_PLY: 68,   // Column BP
+  ENDGAME_START_PLY: 69, // Column BQ
+  EVAL_AT_MOVE20_MY: 70, // Column BR
+  EVAL_AT_MOVE30_MY: 71  // Column BS
 };
 
 // Ensure the header row has expected titles for the opening columns
 function ensureOpeningHeaders_() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
-  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.OPP_ACPL_END)).getValues()[0];
+  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.EVAL_AT_MOVE30_MY)).getValues()[0];
 
   // Expand columns if needed
-  if (sheet.getMaxColumns() < COL.OPP_ACPL_END) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.OPP_ACPL_END - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < COL.EVAL_AT_MOVE30_MY) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.EVAL_AT_MOVE30_MY - sheet.getMaxColumns());
   }
 
   const expected = {
@@ -108,7 +131,30 @@ function ensureOpeningHeaders_() {
     [COL.MY_ACPL_END - 1]: 'MyACPL_End',
     [COL.OPP_ACPL_OPEN - 1]: 'OppACPL_Open',
     [COL.OPP_ACPL_MID - 1]: 'OppACPL_Mid',
-    [COL.OPP_ACPL_END - 1]: 'OppACPL_End'
+    [COL.OPP_ACPL_END - 1]: 'OppACPL_End',
+    [COL.MY_RESULT_NUM - 1]: 'MyResultNum',
+    [COL.ACCURACY_DIFF - 1]: 'MyAccuracyMinusOpp',
+    [COL.RATING_DIFF - 1]: 'OppRatingMinusMyRating',
+    [COL.MAX_LEAD_CP_MY - 1]: 'MaxLeadCpMy',
+    [COL.MIN_LEAD_CP_MY - 1]: 'MinLeadCpMy',
+    [COL.MAX_SWING_CP - 1]: 'MaxSingleMoveSwingCp',
+    [COL.FIRST_INACC_PLY_MY - 1]: 'FirstInaccPlyMy',
+    [COL.FIRST_MIST_PLY_MY - 1]: 'FirstMistPlyMy',
+    [COL.FIRST_BLUN_PLY_MY - 1]: 'FirstBlunPlyMy',
+    [COL.FIRST_INACC_PLY_OPP - 1]: 'FirstInaccPlyOpp',
+    [COL.FIRST_MIST_PLY_OPP - 1]: 'FirstMistPlyOpp',
+    [COL.FIRST_BLUN_PLY_OPP - 1]: 'FirstBlunPlyOpp',
+    [COL.COMEBACK - 1]: 'Comeback',
+    [COL.CONVERSION - 1]: 'Conversion',
+    [COL.SAVE - 1]: 'Save',
+    [COL.ADV_TIME_MY - 1]: 'AdvantageTimeSecMy',
+    [COL.ADV_TIME_OPP - 1]: 'AdvantageTimeSecOpp',
+    [COL.MAX_BLUNDER_STREAK_MY - 1]: 'MaxBlunderStreakMy',
+    [COL.MAX_BLUNDER_STREAK_OPP - 1]: 'MaxBlunderStreakOpp',
+    [COL.OPENING_END_PLY - 1]: 'OpeningEndPly',
+    [COL.ENDGAME_START_PLY - 1]: 'EndgameStartPly',
+    [COL.EVAL_AT_MOVE20_MY - 1]: 'EvalAtMove20My',
+    [COL.EVAL_AT_MOVE30_MY - 1]: 'EvalAtMove30My'
   };
 
   let mutated = false;
@@ -142,7 +188,7 @@ function updateOpeningsFromAnalyzedPgnSheet() {
   const existingOpenings = sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).getValues();
   const existingAnalysis = sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).getValues();
   const existingMetrics = sheet.getRange(2, COL.WHITE_ACPL, rowCount, (COL.THEORY_LIKE_PLY - COL.WHITE_ACPL + 1)).getValues();
-  const existingInsights = sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.OPP_ACPL_END - COL.MY_USERNAME + 1)).getValues();
+  const existingInsights = sheet.getRange(2, COL.MY_USERNAME, rowCount, (COL.EVAL_AT_MOVE30_MY - COL.MY_USERNAME + 1)).getValues();
 
   const openingOutputs = new Array(rowCount);
   const analysisOutputs = new Array(rowCount);
@@ -170,6 +216,7 @@ function updateOpeningsFromAnalyzedPgnSheet() {
     const movesInfo = estimateMovesAndPlies_(evals, pgnText);
     const timeMetrics = computeTimeMetrics_(clocks, my.side, players.initialSec);
     const phaseAcpl = computeAcplByPhase_(evals, metrics ? metrics.theoryLikePly : 0);
+    const extra = computeExtraGameInsights_(pgnText, evals, my, analysis, players, clocks);
     // If no opening parsed, keep existing
     if (!opening || !(opening.family || opening.variation || opening.sub1 || opening.sub2 || opening.eco)) {
       openingOutputs[i] = existingOpenings[i];
@@ -211,8 +258,8 @@ function updateOpeningsFromAnalyzedPgnSheet() {
       my.username || '',
       my.oppUsername || '',
       my.side ? (my.side === 'w' ? 'White' : 'Black') : '',
-      my.rating != null ? my.rating : '',
-      my.oppRating != null ? my.oppRating : '',
+      extra.myRating != null ? extra.myRating : '',
+      extra.oppRating != null ? extra.oppRating : '',
       players.timeControl || '',
       players.initialSec != null ? players.initialSec : '',
       players.increment != null ? players.increment : '',
@@ -229,7 +276,30 @@ function updateOpeningsFromAnalyzedPgnSheet() {
       phaseAcpl.myEnd != null ? phaseAcpl.myEnd : '',
       phaseAcpl.oppOpen != null ? phaseAcpl.oppOpen : '',
       phaseAcpl.oppMid != null ? phaseAcpl.oppMid : '',
-      phaseAcpl.oppEnd != null ? phaseAcpl.oppEnd : ''
+      phaseAcpl.oppEnd != null ? phaseAcpl.oppEnd : '',
+      extra.myResultNum != null ? extra.myResultNum : '',
+      extra.accDiff != null ? extra.accDiff : '',
+      extra.ratingDiff != null ? extra.ratingDiff : '',
+      extra.maxLeadMy != null ? extra.maxLeadMy : '',
+      extra.minLeadMy != null ? extra.minLeadMy : '',
+      extra.maxSwing != null ? extra.maxSwing : '',
+      extra.firstInaccMy != null ? extra.firstInaccMy : '',
+      extra.firstMistMy != null ? extra.firstMistMy : '',
+      extra.firstBlunMy != null ? extra.firstBlunMy : '',
+      extra.firstInaccOpp != null ? extra.firstInaccOpp : '',
+      extra.firstMistOpp != null ? extra.firstMistOpp : '',
+      extra.firstBlunOpp != null ? extra.firstBlunOpp : '',
+      extra.comeback != null ? extra.comeback : '',
+      extra.conversion != null ? extra.conversion : '',
+      extra.save != null ? extra.save : '',
+      extra.advTimeMy != null ? extra.advTimeMy : '',
+      extra.advTimeOpp != null ? extra.advTimeOpp : '',
+      extra.maxBlunderStreakMy != null ? extra.maxBlunderStreakMy : '',
+      extra.maxBlunderStreakOpp != null ? extra.maxBlunderStreakOpp : '',
+      extra.openingEndPly != null ? extra.openingEndPly : '',
+      extra.endgameStartPly != null ? extra.endgameStartPly : '',
+      extra.evalAtMove20My != null ? extra.evalAtMove20My : '',
+      extra.evalAtMove30My != null ? extra.evalAtMove30My : ''
     ];
   }
 
@@ -415,7 +485,7 @@ function determineMyOrientation_(whiteName, blackName) {
   } else if (me && b === me) {
     side = 'b'; username = blackName; oppUsername = whiteName;
   }
-  return { side: side, username: username, oppUsername: oppUsername, rating: null, oppRating: null };
+  return { side: side, username: username, oppUsername: oppUsername, rating: rating, oppRating: oppRating };
 }
 
 function parsePlayersAndGameTagsFromPgn_(pgnText) {
@@ -583,6 +653,155 @@ function computeAcplByPhase_(evals, theoryLikePly) {
 }
 
 function round1_(x) { return Math.round(x * 10) / 10; }
+
+function computeExtraGameInsights_(pgnText, evals, my, analysis, players, clocks) {
+  // Map ratings to my/opp
+  let myRating = null, oppRating = null;
+  if (my.side === 'w') { myRating = players.whiteElo; oppRating = players.blackElo; }
+  else if (my.side === 'b') { myRating = players.blackElo; oppRating = players.whiteElo; }
+
+  // Result numeric
+  const resultTag = extractPgnTag_(pgnText, 'Result');
+  let myResultNum = null;
+  if (my.side) {
+    if (resultTag === '1-0') myResultNum = (my.side === 'w') ? 1 : 0;
+    else if (resultTag === '0-1') myResultNum = (my.side === 'b') ? 1 : 0;
+    else if (resultTag === '1/2-1/2') myResultNum = 0.5;
+  }
+
+  // Accuracy diff
+  const wAcc = parseFloat(analysis.whiteAccuracy || '') || null;
+  const bAcc = parseFloat(analysis.blackAccuracy || '') || null;
+  let accDiff = null;
+  if (wAcc != null && bAcc != null) accDiff = (my.side === 'w') ? (wAcc - bAcc) : (bAcc - wAcc);
+
+  // Rating diff (opp - mine)
+  let ratingDiff = null;
+  if (myRating != null && oppRating != null) ratingDiff = (oppRating - myRating);
+
+  // Lead/swing, first mistakes, blunder streaks
+  let maxLeadMy = null, minLeadMy = null, maxSwing = 0;
+  let firstInaccMy = null, firstMistMy = null, firstBlunMy = null;
+  let firstInaccOpp = null, firstMistOpp = null, firstBlunOpp = null;
+  let streakMy = 0, streakOpp = 0, maxStreakMy = 0, maxStreakOpp = 0;
+  const thInacc = 50, thMist = 100, thBlun = 300;
+
+  for (let i = 0; i < evals.length; i++) {
+    const cp = evals[i].cp;
+    const side = evals[i].side;
+    const myLead = (my.side === 'w') ? cp : -cp;
+    maxLeadMy = (maxLeadMy == null) ? myLead : Math.max(maxLeadMy, myLead);
+    minLeadMy = (minLeadMy == null) ? myLead : Math.min(minLeadMy, myLead);
+    if (i > 0) maxSwing = Math.max(maxSwing, Math.abs(evals[i].cp - evals[i-1].cp));
+
+    if (i > 0) {
+      const before = evals[i-1].cp;
+      const after = evals[i].cp;
+      const mover = side;
+      const beforePersp = (mover === 'w') ? before : -before;
+      const afterPersp = (mover === 'w') ? after : -after;
+      const loss = Math.max(0, beforePersp - afterPersp);
+      const isInacc = loss > thInacc && loss <= thMist;
+      const isMist = loss > thMist && loss <= thBlun;
+      const isBlun = loss > thBlun;
+
+      if (my.side && mover === my.side) {
+        if (isInacc && firstInaccMy == null) firstInaccMy = i + 1;
+        if (isMist && firstMistMy == null) firstMistMy = i + 1;
+        if (isBlun && firstBlunMy == null) firstBlunMy = i + 1;
+        if (isBlun) { streakMy++; maxStreakMy = Math.max(maxStreakMy, streakMy); } else { streakMy = 0; }
+      } else {
+        if (isInacc && firstInaccOpp == null) firstInaccOpp = i + 1;
+        if (isMist && firstMistOpp == null) firstMistOpp = i + 1;
+        if (isBlun && firstBlunOpp == null) firstBlunOpp = i + 1;
+        if (isBlun) { streakOpp++; maxStreakOpp = Math.max(maxStreakOpp, streakOpp); } else { streakOpp = 0; }
+      }
+    }
+  }
+
+  // Comeback/Conversion/Save
+  let comeback = 0, conversion = 0, save = 0;
+  if (my.side) {
+    const hadLead = (maxLeadMy != null && maxLeadMy >= 200);
+    const hadDeficit = (minLeadMy != null && minLeadMy <= -200);
+    if (hadLead && myResultNum === 1) conversion = 1;
+    if (hadDeficit && myResultNum === 0.5) save = 1;
+    if (hadDeficit && myResultNum === 1) comeback = 1;
+  }
+
+  // Advantage time (>= +50 cp) by my side using clocks
+  let advTimeMy = null, advTimeOpp = null;
+  if (clocks && clocks.length && evals && evals.length) {
+    const whiteClocks = [], blackClocks = [];
+    for (let i = 0; i < clocks.length; i++) { if (i % 2 === 0) whiteClocks.push(clocks[i]); else blackClocks.push(clocks[i]); }
+    function sumIntervals(seq) {
+      let sum = 0;
+      for (let i = 1; i < seq.length; i++) if (seq[i-1] != null && seq[i] != null) sum += Math.max(0, seq[i-1] - seq[i]);
+      return sum;
+    }
+    // Count time while lead for the side on move >= +50
+    function timeWhileLeading(side) {
+      let total = 0;
+      if (side === 'w') {
+        for (let i = 1; i < whiteClocks.length; i++) {
+          const cp = evals[i*2 - 1] ? evals[i*2 - 1].cp : null; // before white's i-th move, after black's move
+          if (cp != null && cp >= 50) total += Math.max(0, whiteClocks[i-1] - whiteClocks[i]);
+        }
+      } else {
+        for (let i = 1; i < blackClocks.length; i++) {
+          const cp = evals[i*2] ? evals[i*2].cp : null; // before black's i-th move, after white's move
+          if (cp != null && -cp >= 50) total += Math.max(0, blackClocks[i-1] - blackClocks[i]);
+        }
+      }
+      return total;
+    }
+    advTimeMy = my.side ? timeWhileLeading(my.side) : null;
+    advTimeOpp = my.side ? timeWhileLeading(my.side === 'w' ? 'b' : 'w') : null;
+  }
+
+  // Phase boundaries & checkpoints
+  const openingEndPly = (evals && evals.length) ? Math.max(0, analysis && analysis.theoryLikePly ? analysis.theoryLikePly : 0) : null;
+  const endgameStartPly = (evals && evals.length) ? Math.max(openingEndPly || 0, evals.length - 16) : null;
+  function evalAtMove(moveNum) {
+    const ply = (moveNum * 2) - 1; // after black move
+    if (evals && evals[ply]) {
+      const cp = evals[ply].cp;
+      return (my.side === 'w') ? cp : -cp;
+    }
+    return null;
+  }
+
+  const evalAt20 = evalAtMove(20);
+  const evalAt30 = evalAtMove(30);
+
+  return {
+    myRating: myRating,
+    oppRating: oppRating,
+    myResultNum: myResultNum,
+    accDiff: accDiff,
+    ratingDiff: ratingDiff,
+    maxLeadMy: maxLeadMy,
+    minLeadMy: minLeadMy,
+    maxSwing: maxSwing,
+    firstInaccMy: firstInaccMy,
+    firstMistMy: firstMistMy,
+    firstBlunMy: firstBlunMy,
+    firstInaccOpp: firstInaccOpp,
+    firstMistOpp: firstMistOpp,
+    firstBlunOpp: firstBlunOpp,
+    comeback: comeback,
+    conversion: conversion,
+    save: save,
+    advTimeMy: advTimeMy,
+    advTimeOpp: advTimeOpp,
+    maxBlunderStreakMy: maxStreakMy,
+    maxBlunderStreakOpp: maxStreakOpp,
+    openingEndPly: openingEndPly,
+    endgameStartPly: endgameStartPly,
+    evalAtMove20My: evalAt20,
+    evalAtMove30My: evalAt30
+  };
+}
 
 // Reads a PGN tag like [TagName "Value"] and returns the Value
 function extractPgnTag_(pgnText, tagName) {
