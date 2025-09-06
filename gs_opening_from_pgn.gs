@@ -1,5 +1,6 @@
-// Apps Script utility to parse opening fields from a PGN export and
+// Apps Script utility to parse opening and analysis fields from a PGN export and
 // populate OpeningFamily, OpeningVariation, OpeningSub1, OpeningSub2, OpeningECO
+// plus WhiteAccuracy, BlackAccuracy, and Result
 // in a Google Sheet. This relies solely on PGN tags: [Opening "..."] and [ECO "..."]
 
 const SHEET_NAME = 'Games';
@@ -11,18 +12,21 @@ const COL = {
   OPEN_VAR: 7,      // Column G: OpeningVariation
   OPEN_SUB1: 8,     // Column H: OpeningSub1
   OPEN_SUB2: 9,     // Column I: OpeningSub2
-  OPEN_ECO: 10      // Column J: OpeningECO
+  OPEN_ECO: 10,     // Column J: OpeningECO
+  WHITE_ACC: 11,    // Column K: WhiteAccuracy
+  BLACK_ACC: 12,    // Column L: BlackAccuracy
+  RESULT: 13        // Column M: Result (e.g., 1-0, 0-1, 1/2-1/2)
 };
 
 // Ensure the header row has expected titles for the opening columns
 function ensureOpeningHeaders_() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
-  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.OPEN_ECO)).getValues()[0];
+  const headers = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), COL.RESULT)).getValues()[0];
 
   // Expand columns if needed
-  if (sheet.getMaxColumns() < COL.OPEN_ECO) {
-    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.OPEN_ECO - sheet.getMaxColumns());
+  if (sheet.getMaxColumns() < COL.RESULT) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), COL.RESULT - sheet.getMaxColumns());
   }
 
   const expected = {
@@ -30,7 +34,10 @@ function ensureOpeningHeaders_() {
     [COL.OPEN_VAR - 1]: 'OpeningVariation',
     [COL.OPEN_SUB1 - 1]: 'OpeningSub1',
     [COL.OPEN_SUB2 - 1]: 'OpeningSub2',
-    [COL.OPEN_ECO - 1]: 'OpeningECO'
+    [COL.OPEN_ECO - 1]: 'OpeningECO',
+    [COL.WHITE_ACC - 1]: 'WhiteAccuracy',
+    [COL.BLACK_ACC - 1]: 'BlackAccuracy',
+    [COL.RESULT - 1]: 'Result'
   };
 
   let mutated = false;
@@ -47,7 +54,7 @@ function ensureOpeningHeaders_() {
   }
 }
 
-// Main entry: read PGN from column E and fill opening columns F-J
+// Main entry: read PGN from column E and fill opening columns F-J and analysis columns K-M
 function updateOpeningsFromAnalyzedPgnSheet() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error('Sheet "' + SHEET_NAME + '" not found.');
@@ -62,23 +69,27 @@ function updateOpeningsFromAnalyzedPgnSheet() {
   // Read PGNs and existing opening values to avoid wiping non-empty rows unnecessarily
   const pgnValues = sheet.getRange(2, COL.ANALYZED_PGN, rowCount, 1).getValues();
   const existingOpenings = sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).getValues();
+  const existingAnalysis = sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).getValues();
 
-  const outputs = new Array(rowCount);
+  const openingOutputs = new Array(rowCount);
+  const analysisOutputs = new Array(rowCount);
 
   for (let i = 0; i < rowCount; i++) {
     const pgnText = (pgnValues[i][0] || '').toString();
     if (!pgnText) {
       // keep existing values if PGN is empty
-      outputs[i] = existingOpenings[i];
+      openingOutputs[i] = existingOpenings[i];
+      analysisOutputs[i] = existingAnalysis[i];
       continue;
     }
 
     const opening = parseOpeningFieldsFromPgn(pgnText);
+    const analysis = parseAnalysisFieldsFromPgn(pgnText);
     // If no opening parsed, keep existing
     if (!opening || !(opening.family || opening.variation || opening.sub1 || opening.sub2 || opening.eco)) {
-      outputs[i] = existingOpenings[i];
+      openingOutputs[i] = existingOpenings[i];
     } else {
-      outputs[i] = [
+      openingOutputs[i] = [
         opening.family || '',
         opening.variation || '',
         opening.sub1 || '',
@@ -86,9 +97,20 @@ function updateOpeningsFromAnalyzedPgnSheet() {
         opening.eco || ''
       ];
     }
+
+    if (!analysis || !(analysis.whiteAccuracy || analysis.blackAccuracy || analysis.result)) {
+      analysisOutputs[i] = existingAnalysis[i];
+    } else {
+      analysisOutputs[i] = [
+        analysis.whiteAccuracy || '',
+        analysis.blackAccuracy || '',
+        analysis.result || ''
+      ];
+    }
   }
 
-  sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).setValues(outputs);
+  sheet.getRange(2, COL.OPEN_FAM, rowCount, 5).setValues(openingOutputs);
+  sheet.getRange(2, COL.WHITE_ACC, rowCount, 3).setValues(analysisOutputs);
 }
 
 // Extracts Opening/ECO tags and splits into family/variation/sub-variations
@@ -105,6 +127,19 @@ function parseOpeningFieldsFromPgn(pgnText) {
     sub1: (parts.subs && parts.subs[0]) || '',
     sub2: (parts.subs && parts.subs[1]) || '',
     eco: eco || ''
+  };
+}
+
+// Extract WhiteAccuracy/BlackAccuracy/Result from PGN tags, if present
+function parseAnalysisFieldsFromPgn(pgnText) {
+  if (!pgnText) return { whiteAccuracy: '', blackAccuracy: '', result: '' };
+  const whiteAcc = extractPgnTag_(pgnText, 'WhiteAccuracy');
+  const blackAcc = extractPgnTag_(pgnText, 'BlackAccuracy');
+  const result = extractPgnTag_(pgnText, 'Result');
+  return {
+    whiteAccuracy: whiteAcc || '',
+    blackAccuracy: blackAcc || '',
+    result: result || ''
   };
 }
 

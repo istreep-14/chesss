@@ -19,17 +19,24 @@ Create a sheet named `Games` with at least these columns:
 8. `OpeningSub1`
 9. `OpeningSub2`
 10. `OpeningECO`
+11. `WhiteAccuracy`
+12. `BlackAccuracy`
+13. `Result`
 
 `gs_opening_from_pgn.gs` will ensure the Opening columns (6–10) exist.
 
-### Usage: Fill Opening Columns From PGN
+### Usage: Fill Opening & Analysis Columns From PGN
 1. Export or fetch the analyzed PGN from Lichess and place it in column E (`AnalyzedPGN`).
 2. In Apps Script, run `updateOpeningsFromAnalyzedPgnSheet()`.
-3. The script will parse:
+3. The script will parse opening fields:
    - `OpeningFamily`: text before the first `:`
    - `OpeningVariation`: first item after `:`
    - `OpeningSub1`, `OpeningSub2`: subsequent comma-separated items
    - `OpeningECO`: from the `[ECO "..."]` tag
+   And analysis fields:
+   - `WhiteAccuracy`: from `[WhiteAccuracy "..."]`
+   - `BlackAccuracy`: from `[BlackAccuracy "..."]`
+   - `Result`: from `[Result "..."]` (e.g., `1-0`, `0-1`, `1/2-1/2`)
 
 Example mapping:
 
@@ -46,6 +53,9 @@ OpeningVariation: Najdorf Variation
 OpeningSub1:     English Attack
 OpeningSub2:     (empty)
 OpeningECO:      B90
+WhiteAccuracy:   92.4
+BlackAccuracy:   78.1
+Result:          1-0
 ```
 
 ### Notes
