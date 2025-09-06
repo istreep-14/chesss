@@ -1,9 +1,35 @@
+// =====================
+// Configuration
+// =====================
+// Update values here to control behavior without touching the rest of the code.
 const PLAYER_USERNAME = 'frankscobey';
 const SHEET_ID = '12zoMMkrkZz9WmhL4ds9lo8-91o-so337dOKwU3_yK3k';
 const SHEET_NAME = 'Games';
 
-// Optional: how many recent monthly archives to scan on each sync
+// How many recent monthly archives to scan on each sync run
 const RECENT_ARCHIVES_TO_SCAN = 2;
+
+// Backfill batch limits per run (set large to process all)
+const BACKFILL_MOVES_CLOCKS_BATCH = 200;    // for backfillMovesAndClocks()
+const BACKFILL_ECO_OPENING_BATCH = 200;     // for backfillEcoAndOpening()
+const BACKFILL_CALLBACK_FIELDS_BATCH = 200; // for backfillCallbackFields()
+
+// Throttling to be gentle with APIs and Sheets writes
+const THROTTLE_APPEND_EVERY_N_ROWS = 100;   // sleep after this many buffered rows
+const THROTTLE_SLEEP_MS = 200;              // ms to sleep when throttling
+
+// API base URLs
+const CHESS_COM_API_BASE = 'https://api.chess.com/pub';
+const CHESS_COM_CALLBACK_BASE = 'https://www.chess.com/callback';
+
+// Endboard image settings
+const ENDBOARD_BASE_URL = 'https://www.chess.com/dynboard';
+const ENDBOARD_BOARD = 'brown';
+const ENDBOARD_PIECE = 'neo';
+const ENDBOARD_SIZE = 3; // 1..10
+
+// Trigger interval minutes for the installer helper
+const TRIGGER_INTERVAL_MINUTES = 15;
 
 function setupSheet() {
   ensureSheet();
@@ -67,7 +93,9 @@ function backfillAllGamesOnce() {
       existingUrls.add(game.url);
 
       // Optional: light throttling to be gentle with API/sheet
-      if ((rowsToAppend.length % 100) === 0) Utilities.sleep(200);
+      if (THROTTLE_APPEND_EVERY_N_ROWS > 0 && (rowsToAppend.length % THROTTLE_APPEND_EVERY_N_ROWS) === 0) {
+        Utilities.sleep(THROTTLE_SLEEP_MS);
+      }
     }
 
     // Optional: write in batches per month to avoid large in-memory arrays
@@ -78,7 +106,7 @@ function backfillAllGamesOnce() {
 
 function getArchives() {
   const profileResp = UrlFetchApp.fetch(
-    'https://api.chess.com/pub/player/' + encodeURIComponent(PLAYER_USERNAME),
+    CHESS_COM_API_BASE + '/player/' + encodeURIComponent(PLAYER_USERNAME),
     { muteHttpExceptions: true }
   );
   if (profileResp.getResponseCode() !== 200) {
@@ -86,7 +114,7 @@ function getArchives() {
   }
 
   const archivesResp = UrlFetchApp.fetch(
-    'https://api.chess.com/pub/player/' + encodeURIComponent(PLAYER_USERNAME) + '/games/archives',
+    CHESS_COM_API_BASE + '/player/' + encodeURIComponent(PLAYER_USERNAME) + '/games/archives',
     { muteHttpExceptions: true }
   );
   if (archivesResp.getResponseCode() !== 200) {
@@ -432,7 +460,7 @@ function normalizeGame(game) {
 
   var fen = game.fen || '';
   var fenEncoded = encodeURIComponent(fen);
-  var imageUrl = 'https://www.chess.com/dynboard?fen=' + fenEncoded + '&board=brown&piece=neo&size=3';
+  var imageUrl = ENDBOARD_BASE_URL + '?fen=' + fenEncoded + '&board=' + encodeURIComponent(ENDBOARD_BOARD) + '&piece=' + encodeURIComponent(ENDBOARD_PIECE) + '&size=' + encodeURIComponent(String(ENDBOARD_SIZE));
 
   var endTime = game.end_time ? new Date(game.end_time * 1000) : new Date();
 
@@ -582,7 +610,7 @@ function determineReason(side, opponent) {
 function installTriggerEvery15Minutes() {
   ScriptApp.newTrigger('syncRecentGames')
     .timeBased()
-    .everyMinutes(15)
+    .everyMinutes(TRIGGER_INTERVAL_MINUTES)
     .create();
 }
 
@@ -601,7 +629,7 @@ function installTriggerEvery15Minutes() {
  */
 function fetchCallbackGamePgn(gameId) {
   if (!gameId) return '';
-  var url = 'https://www.chess.com/callback/live/game/' + encodeURIComponent(String(gameId));
+  var url = CHESS_COM_CALLBACK_BASE + '/live/game/' + encodeURIComponent(String(gameId));
   var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (resp.getResponseCode() !== 200) return '';
   var text = resp.getContentText();
@@ -626,7 +654,7 @@ function fetchCallbackGamePgn(gameId) {
  */
 function fetchCallbackGameData(gameId) {
   if (!gameId) return null;
-  var url = 'https://www.chess.com/callback/live/game/' + encodeURIComponent(String(gameId));
+  var url = CHESS_COM_CALLBACK_BASE + '/live/game/' + encodeURIComponent(String(gameId));
   var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (resp.getResponseCode() !== 200) return null;
   var text = resp.getContentText();
@@ -838,13 +866,14 @@ function backfillMovesAndClocks(limit) {
     var hasClocks = String(clocksVals[r][0] || '').trim() !== '';
     if (!hasMoves || !hasClocks) toProcessCount++;
   }
+  var effectiveLimit = toProcessCount;
   if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
-    // noop, we will enforce during loop
-  } else {
-    limit = toProcessCount; // process all missing by default
+    effectiveLimit = Math.min(toProcessCount, limit);
+  } else if (typeof BACKFILL_MOVES_CLOCKS_BATCH === 'number' && BACKFILL_MOVES_CLOCKS_BATCH > 0) {
+    effectiveLimit = Math.min(toProcessCount, BACKFILL_MOVES_CLOCKS_BATCH);
   }
 
-  for (var i = 0, processed = 0; i < numRows && processed < limit; i++) {
+  for (var i = 0, processed = 0; i < numRows && processed < effectiveLimit; i++) {
     var currentMoves = String(movesSanVals[i][0] || '').trim();
     var currentClocks = String(clocksVals[i][0] || '').trim();
     if (currentMoves && currentClocks) continue;
@@ -951,6 +980,8 @@ function backfillEcoAndOpening(limit) {
 
   if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
     candidates = candidates.slice(0, limit);
+  } else if (typeof BACKFILL_ECO_OPENING_BATCH === 'number' && BACKFILL_ECO_OPENING_BATCH > 0) {
+    candidates = candidates.slice(0, BACKFILL_ECO_OPENING_BATCH);
   }
 
   for (var i = 0; i < candidates.length; i++) {
@@ -1096,6 +1127,8 @@ function backfillCallbackFields(limit) {
   var toProcess = numRows;
   if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
     toProcess = Math.min(toProcess, limit);
+  } else if (typeof BACKFILL_CALLBACK_FIELDS_BATCH === 'number' && BACKFILL_CALLBACK_FIELDS_BATCH > 0) {
+    toProcess = Math.min(toProcess, BACKFILL_CALLBACK_FIELDS_BATCH);
   }
 
   for (var i = 0; i < numRows && i < toProcess; i++) {
