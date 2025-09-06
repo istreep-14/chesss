@@ -221,10 +221,9 @@ function normalizeGame(game) {
 
   var endTime = game.end_time ? new Date(game.end_time * 1000) : new Date();
 
-  // Parse PGN tags for ECO, Opening URL, and get movetext (moves)
+  // Parse PGN tags for ECO and Opening URL only (skip heavy movetext parsing here)
   var eco = game.eco || '';
   var openingUrl = '';
-  var moves = '';
   var movesSan = '';
   var clocksStr = '';
   if (game.pgn) {
@@ -235,33 +234,8 @@ function normalizeGame(game) {
       if (ecoMatch && ecoMatch[1] && !eco) eco = ecoMatch[1];
       var ecoUrlMatch = pgn.match(/^\[(?:ECOUrl|OpeningUrl)\s+"([^"]+)"\]/m);
       if (ecoUrlMatch && ecoUrlMatch[1]) openingUrl = ecoUrlMatch[1];
-      // Extract movetext: prefer blank line after headers, else after last header closing
-      var headerEnd = pgn.indexOf('\n\n');
-      var afterHeaders = '';
-      if (headerEnd !== -1) {
-        afterHeaders = pgn.substring(headerEnd + 2);
-      } else {
-        var splitIndex = pgn.lastIndexOf(']\n');
-        if (splitIndex !== -1) afterHeaders = pgn.substring(splitIndex + 2);
-      }
-      if (afterHeaders) {
-        afterHeaders = afterHeaders.replace(/^\s+/, '');
-        // Remove result token at end (e.g., 1-0, 0-1, 1/2-1/2, *), if present
-        moves = afterHeaders.replace(/\s+(1-0|0-1|1\/2-1\/2|\*)\s*$/m, '');
-      }
     } catch (e) {
       // ignore PGN parse issues
-    }
-  }
-
-  // Build SAN and clock lists using the parser
-  if (moves) {
-    var parsed = splitMovesWithClocks(moves);
-    if (parsed && parsed.length) {
-      var sanList = parsed.map(function(m) { return m.san; });
-      var clockList = parsed.map(function(m) { return m.clock; });
-      movesSan = sanList.length ? '{' + sanList.join(', ') + '}' : '';
-      clocksStr = clockList.length ? '{' + clockList.join(', ') + '}' : '';
     }
   }
 
@@ -357,6 +331,174 @@ function installTriggerEvery15Minutes() {
     .timeBased()
     .everyMinutes(15)
     .create();
+}
+
+/**
+ * Ensure the header row contains "Moves (SAN)" and "Clocks" columns.
+ * If an older header had a single "Moves" column, convert it to "Moves (SAN)"
+ * and insert a new "Clocks" column after it.
+ */
+function ensureMovesClocksHeaders() {
+  const sheet = getOrCreateSheet();
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return;
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  var movesSanIdx = headers.indexOf('Moves (SAN)');
+  var clocksIdx = headers.indexOf('Clocks');
+  var legacyMovesIdx = headers.indexOf('Moves');
+
+  if (movesSanIdx !== -1 && clocksIdx !== -1) {
+    return; // already up to date
+  }
+
+  if (legacyMovesIdx !== -1) {
+    // Rename legacy "Moves" to "Moves (SAN)" and insert "Clocks" after it
+    sheet.getRange(1, legacyMovesIdx + 1).setValue('Moves (SAN)');
+    sheet.insertColumnsAfter(legacyMovesIdx + 1, 1);
+    sheet.getRange(1, legacyMovesIdx + 2).setValue('Clocks');
+    return;
+  }
+
+  // Neither new nor legacy headers found; append both at the end
+  const currentLastCol = sheet.getLastColumn();
+  sheet.insertColumnsAfter(currentLastCol, 2);
+  sheet.getRange(1, currentLastCol + 1, 1, 2).setValues([
+    ['Moves (SAN)', 'Clocks']
+  ]);
+}
+
+/**
+ * Fetches live game callback data for a given Chess.com gameId and tries to
+ * obtain a PGN string. Returns empty string if not found.
+ * @param {string} gameId
+ * @return {string}
+ */
+function fetchCallbackGamePgn(gameId) {
+  if (!gameId) return '';
+  var url = 'https://www.chess.com/callback/live/game/' + encodeURIComponent(String(gameId));
+  var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200) return '';
+  var text = resp.getContentText();
+  if (!text) return '';
+  try {
+    var data = JSON.parse(text);
+    if (data && data.pgn) return String(data.pgn);
+    if (data && data.game && data.game.pgn) return String(data.game.pgn);
+  } catch (e) {
+    // Not JSON; fall through to heuristic PGN extraction from text
+  }
+  // Heuristic: look for typical PGN start and end markers in raw text
+  var pgnMatch = text.match(/\[Event[^]*?(?:\n\n|\r\n\r\n)[^]*$/);
+  if (pgnMatch && pgnMatch[0]) return String(pgnMatch[0]);
+  return '';
+}
+
+/**
+ * Given a PGN string, extract movetext and return bracketed lists:
+ * {san1, san2, ...} and {clk1, clk2, ...}
+ * @param {string} pgn
+ * @return {{ movesSan: string, clocks: string }}
+ */
+function parsePgnToSanAndClocks(pgn) {
+  var movesSan = '';
+  var clocksStr = '';
+  if (!pgn) return { movesSan: movesSan, clocks: clocksStr };
+
+  var normalized = String(pgn).replace(/\r\n/g, '\n');
+  var headerEnd = normalized.indexOf('\n\n');
+  var body = '';
+  if (headerEnd !== -1) {
+    body = normalized.substring(headerEnd + 2);
+  } else {
+    var splitIndex = normalized.lastIndexOf(']\n');
+    if (splitIndex !== -1) body = normalized.substring(splitIndex + 2);
+  }
+  if (!body) return { movesSan: movesSan, clocks: clocksStr };
+
+  body = body.replace(/^\s+/, '');
+  body = body.replace(/\s+(1-0|0-1|1\/2-1\/2|\*)\s*$/m, '');
+
+  var parsed = splitMovesWithClocks(body);
+  if (parsed && parsed.length) {
+    var sanList = parsed.map(function(m) { return m.san; });
+    var clkList = parsed.map(function(m) { return m.clock; });
+    movesSan = sanList.length ? '{' + sanList.join(', ') + '}' : '';
+    clocksStr = clkList.length ? '{' + clkList.join(', ') + '}' : '';
+  }
+  return { movesSan: movesSan, clocks: clocksStr };
+}
+
+/**
+ * Backfills missing "Moves (SAN)" and "Clocks" for existing rows by
+ * querying https://www.chess.com/callback/live/game/{game-id}.
+ * Optionally provide a limit of how many missing rows to process this run.
+ *
+ * @param {number=} limit Optional max number of rows to process
+ */
+function backfillMovesAndClocks(limit) {
+  const sheet = getOrCreateSheet();
+  ensureMovesClocksHeaders();
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  // Build header map to locate columns robustly
+  const lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var headerToIndex = {};
+  for (var c = 0; c < headers.length; c++) {
+    headerToIndex[headers[c]] = c + 1; // 1-based
+  }
+
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+  var colMovesSan = headerToIndex['Moves (SAN)'];
+  var colClocks = headerToIndex['Clocks'];
+  if (!colMovesSan || !colClocks) return; // headers must exist
+
+  var numRows = lastRow - 1;
+  var gameIds = sheet.getRange(2, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(2, colUrl, numRows, 1).getValues();
+  var movesSanVals = sheet.getRange(2, colMovesSan, numRows, 1).getValues();
+  var clocksVals = sheet.getRange(2, colClocks, numRows, 1).getValues();
+
+  var toProcessCount = 0;
+  for (var r = 0; r < numRows; r++) {
+    var hasMoves = String(movesSanVals[r][0] || '').trim() !== '';
+    var hasClocks = String(clocksVals[r][0] || '').trim() !== '';
+    if (!hasMoves || !hasClocks) toProcessCount++;
+  }
+  if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
+    // noop, we will enforce during loop
+  } else {
+    limit = toProcessCount; // process all missing by default
+  }
+
+  for (var i = 0, processed = 0; i < numRows && processed < limit; i++) {
+    var currentMoves = String(movesSanVals[i][0] || '').trim();
+    var currentClocks = String(clocksVals[i][0] || '').trim();
+    if (currentMoves && currentClocks) continue;
+
+    var gid = String(gameIds[i][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[i][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var pgn = fetchCallbackGamePgn(gid);
+    if (!pgn) continue;
+    var parsed = parsePgnToSanAndClocks(pgn);
+    movesSanVals[i][0] = parsed.movesSan || currentMoves;
+    clocksVals[i][0] = parsed.clocks || currentClocks;
+    processed++;
+  }
+
+  // Batch update the entire two columns at once
+  sheet.getRange(2, colMovesSan, numRows, 1).setValues(movesSanVals);
+  sheet.getRange(2, colClocks, numRows, 1).setValues(clocksVals);
 }
 
 /**
