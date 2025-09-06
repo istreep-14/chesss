@@ -210,14 +210,6 @@ function ensureSheet() {
   var extraHeaders = [
     'White rating change',
     'Black rating change',
-    'Winner color',
-    'Game end reason',
-    'Result message',
-    'Move timestamps',
-    'Move list',
-    'Last move',
-    'Base time (s)',
-    'Increment (s)',
     'Is live game',
     'Is abortable',
     'Is analyzable',
@@ -248,6 +240,31 @@ function ensureSheet() {
     var last2 = sheet.getLastColumn();
     sheet.insertColumnsAfter(last2, missing.length);
     sheet.getRange(1, last2 + 1, 1, missing.length).setValues([missing]);
+  }
+
+  // Remove redundant/duplicate columns if they exist
+  var headersToRemove = [
+    'Winner color',
+    'Game end reason',
+    'Result message',
+    'Move timestamps',
+    'Move list',
+    'Last move',
+    'Base time (s)',
+    'Increment (s)'
+  ];
+  headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var removeCols = [];
+  for (var r = 0; r < headersToRemove.length; r++) {
+    var idx = headers.indexOf(headersToRemove[r]);
+    if (idx !== -1) removeCols.push(idx + 1); // 1-based
+  }
+  if (removeCols.length) {
+    // Sort descending to avoid shifting indexes while deleting
+    removeCols.sort(function(a, b) { return b - a; });
+    for (var d = 0; d < removeCols.length; d++) {
+      sheet.deleteColumn(removeCols[d]);
+    }
   }
 
   return sheet;
@@ -287,6 +304,7 @@ function buildRow(details) {
     details.opponentUsername,         // Opponent
     details.opponentRating || '',     // Opponent rating
     details.myRating || '',           // My rating
+    '',                               // Rating change (placeholder)
     details.result,                   // Result
     details.reason,                   // Reason
     details.fen,                      // FEN
@@ -336,8 +354,8 @@ function normalizeGame(game) {
 
   var endTime = game.end_time ? new Date(game.end_time * 1000) : new Date();
 
-  // Parse PGN tags for ECO and Opening URL only (skip heavy movetext parsing here)
-  var eco = game.eco || '';
+  // Parse PGN tags for ECO (code only) and Opening URL distinctly
+  var eco = '';
   var openingUrl = '';
   var movesSan = '';
   var clocksStr = '';
@@ -346,12 +364,20 @@ function normalizeGame(game) {
       var pgn = String(game.pgn).replace(/\r\n/g, '\n');
       // Extract tags like [ECO "B01"] and [ECOUrl "..."] anchored per line
       var ecoMatch = pgn.match(/^\[ECO\s+"([^"]+)"\]/m);
-      if (ecoMatch && ecoMatch[1] && !eco) eco = ecoMatch[1];
+      if (ecoMatch && ecoMatch[1]) eco = ecoMatch[1];
       var ecoUrlMatch = pgn.match(/^\[(?:ECOUrl|OpeningUrl)\s+"([^"]+)"\]/m);
       if (ecoUrlMatch && ecoUrlMatch[1]) openingUrl = ecoUrlMatch[1];
     } catch (e) {
       // ignore PGN parse issues
     }
+  }
+  // Fallback to API fields if PGN lacked them
+  if (!eco && game.eco && !/^https?:\/\//i.test(String(game.eco))) eco = String(game.eco);
+  if (!openingUrl && game.opening_url) openingUrl = String(game.opening_url);
+  // If ECO accidentally contains a URL, move it to Opening URL and clear ECO
+  if (eco && /^https?:\/\//i.test(eco)) {
+    if (!openingUrl) openingUrl = eco;
+    eco = '';
   }
 
   // Derive format per rules
