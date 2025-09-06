@@ -502,6 +502,102 @@ function backfillMovesAndClocks(limit) {
 }
 
 /**
+ * Extract ECO code and Opening URL from a PGN string.
+ * @param {string} pgn
+ * @return {{ eco: string, openingUrl: string }}
+ */
+function parseEcoAndOpeningFromPgn(pgn) {
+  var eco = '';
+  var openingUrl = '';
+  if (!pgn) return { eco: eco, openingUrl: openingUrl };
+  try {
+    var normalized = String(pgn).replace(/\r\n/g, '\n');
+    var ecoMatch = normalized.match(/^\[ECO\s+"([^"]+)"\]/m);
+    if (ecoMatch && ecoMatch[1]) eco = ecoMatch[1];
+    var urlMatch = normalized.match(/^\[(?:ECOUrl|OpeningUrl)\s+"([^"]+)"\]/m);
+    if (urlMatch && urlMatch[1]) openingUrl = urlMatch[1];
+  } catch (e) {}
+  return { eco: eco, openingUrl: openingUrl };
+}
+
+/**
+ * Backfills missing ECO and Opening URL for existing rows by querying
+ * https://www.chess.com/callback/live/game/{game-id}. Will not overwrite
+ * non-empty values unless ECO appears to be a URL (bad old data).
+ *
+ * @param {number=} limit Optional max number of rows to process this run
+ */
+function backfillEcoAndOpening(limit) {
+  const sheet = getOrCreateSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var headerToIndex = {};
+  for (var c = 0; c < headers.length; c++) headerToIndex[headers[c]] = c + 1;
+
+  var colGameId = headerToIndex['Game ID'] || 3;
+  var colUrl = headerToIndex['URL'] || 2;
+  var colEco = headerToIndex['ECO'];
+  var colOpeningUrl = headerToIndex['Opening URL'];
+  if (!colEco || !colOpeningUrl) return;
+
+  var numRows = lastRow - 1;
+  var gameIds = sheet.getRange(2, colGameId, numRows, 1).getValues();
+  var urls = sheet.getRange(2, colUrl, numRows, 1).getValues();
+  var ecos = sheet.getRange(2, colEco, numRows, 1).getValues();
+  var openingUrls = sheet.getRange(2, colOpeningUrl, numRows, 1).getValues();
+
+  var candidates = [];
+  for (var r = 0; r < numRows; r++) {
+    var ecoVal = String(ecos[r][0] || '').trim();
+    var openVal = String(openingUrls[r][0] || '').trim();
+    var ecoLooksWrong = ecoVal && /^https?:\/\//i.test(ecoVal);
+    if (!ecoVal || !openVal || ecoLooksWrong) candidates.push(r);
+  }
+
+  if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
+    candidates = candidates.slice(0, limit);
+  }
+
+  for (var i = 0; i < candidates.length; i++) {
+    var idx = candidates[i];
+    var gid = String(gameIds[idx][0] || '').trim();
+    if (!gid) {
+      var url = String(urls[idx][0] || '');
+      var idMatch = url.match(/\/(\d+)(?:\?.*)?$/);
+      if (idMatch && idMatch[1]) gid = idMatch[1];
+    }
+    if (!gid) continue;
+
+    var pgn = fetchCallbackGamePgn(gid);
+    if (!pgn) continue;
+    var parsed = parseEcoAndOpeningFromPgn(pgn);
+
+    // Only write when empty or obviously wrong
+    if (!String(ecos[idx][0] || '').trim() || /^https?:\/\//i.test(String(ecos[idx][0] || ''))) {
+      ecos[idx][0] = parsed.eco || ecos[idx][0];
+    }
+    if (!String(openingUrls[idx][0] || '').trim()) {
+      openingUrls[idx][0] = parsed.openingUrl || openingUrls[idx][0];
+    }
+  }
+
+  sheet.getRange(2, colEco, numRows, 1).setValues(ecos);
+  sheet.getRange(2, colOpeningUrl, numRows, 1).setValues(openingUrls);
+}
+
+/**
+ * Convenience: backfill both ECO/Opening and Moves/Clocks.
+ * @param {number=} limit Optional max rows for each pass
+ */
+function backfillAllMetadata(limit) {
+  backfillEcoAndOpening(limit);
+  backfillMovesAndClocks(limit);
+}
+
+/**
  * Splits a movetext string that contains move numbers and clock annotations
  * like: "1. e4 {[%clk 0:02:59.9]} 1... e5 {[%clk 0:02:59.1]} 2. Nf3 {[%clk 0:02:59.1]}"
  * into a structured list of moves.
