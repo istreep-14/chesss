@@ -222,6 +222,7 @@ function ensureSheet() {
       'Opponent rating change',
       'My rating',
       'My rating pregame',
+      'My rating pregame_derived',
       'My rating change',
       'Result',
       'Result_Value',
@@ -354,8 +355,10 @@ function ensureSheet() {
   if (myRatingIdx !== -1) {
     var myPregameIdx = headers.indexOf('My rating pregame');
     var myChangeIdx = headers.indexOf('My rating change');
+    var myPregameDerivedIdx = headers.indexOf('My rating pregame_derived');
     var toInsertMy = [];
     if (myPregameIdx === -1) toInsertMy.push('My rating pregame');
+    if (myPregameDerivedIdx === -1) toInsertMy.push('My rating pregame_derived');
     if (myChangeIdx === -1) toInsertMy.push('My rating change');
     if (toInsertMy.length) {
       var afterMy = myRatingIdx + 1;
@@ -468,6 +471,7 @@ function buildRow(details) {
     '',                               // Opponent rating change (backfilled)
     details.myRating || '',           // My rating
     '',                               // My rating pregame (backfilled)
+    '',                               // My rating pregame_derived (backfilled)
     '',                               // My rating change (backfilled)
     details.result,                   // Result
     (details.resultValue != null ? details.resultValue : ''), // Result_Value
@@ -1325,7 +1329,6 @@ function backfillCallbackFields(limit) {
 function backfillAllMetadata(limit) {
   backfillEcoAndOpening(limit);
   backfillMovesAndClocks(limit);
-  backfillCallbackFields(limit);
 }
 
 /**
@@ -1375,15 +1378,30 @@ function backfillCallbackHeaderFields(limit) {
   var myMembershipCodeVals = initColumn(colMyMembershipCode);
   var myMembershipLevelVals = initColumn(colMyMembershipLevel);
 
-  var toProcess = numRows;
+  // Build candidate list: rows missing any targeted callback header fields
+  var candidates = [];
+  for (var r = 0; r < numRows; r++) {
+    var needs = false;
+    if (whiteDeltaVals && String(whiteDeltaVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && blackDeltaVals && String(blackDeltaVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && oppMembershipCodeVals && String(oppMembershipCodeVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && oppMembershipLevelVals && String(oppMembershipLevelVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && oppCountryVals && String(oppCountryVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && oppAvatarVals && String(oppAvatarVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && myMembershipCodeVals && String(myMembershipCodeVals[r][0] || '').trim() === '') needs = true;
+    if (!needs && myMembershipLevelVals && String(myMembershipLevelVals[r][0] || '').trim() === '') needs = true;
+    if (needs) candidates.push(r);
+  }
+
   if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
-    toProcess = Math.min(toProcess, limit);
+    candidates = candidates.slice(0, limit);
   } else if (typeof BATCH_SIZE === 'number' && BATCH_SIZE > 0) {
-    toProcess = Math.min(toProcess, BATCH_SIZE);
+    candidates = candidates.slice(0, BATCH_SIZE);
   }
 
   var processed = 0;
-  for (var i = 0; i < numRows && processed < toProcess; i++) {
+  for (var k = 0; k < candidates.length; k++) {
+    var i = candidates[k];
     var gid = String(gameIds[i][0] || '').trim();
     if (!gid) {
       var url = String(urls[i][0] || '');
@@ -1399,19 +1417,19 @@ function backfillCallbackHeaderFields(limit) {
     var top = players.top || {};
     var bottom = players.bottom || {};
 
-    if (whiteDeltaVals) whiteDeltaVals[i][0] = (g.ratingChangeWhite != null) ? g.ratingChangeWhite : whiteDeltaVals[i][0];
-    if (blackDeltaVals) blackDeltaVals[i][0] = (g.ratingChangeBlack != null) ? g.ratingChangeBlack : blackDeltaVals[i][0];
+    if (whiteDeltaVals && String(whiteDeltaVals[i][0] || '').trim() === '' && (g.ratingChangeWhite != null)) whiteDeltaVals[i][0] = g.ratingChangeWhite;
+    if (blackDeltaVals && String(blackDeltaVals[i][0] || '').trim() === '' && (g.ratingChangeBlack != null)) blackDeltaVals[i][0] = g.ratingChangeBlack;
 
     var ourColor = colors ? String(colors[i][0] || '').toLowerCase() : '';
     var opponentObj = (ourColor === 'white') ? top : bottom;
     var myObj = (ourColor === 'white') ? bottom : top;
 
-    if (oppMembershipCodeVals) oppMembershipCodeVals[i][0] = opponentObj.membershipCode || oppMembershipCodeVals[i][0];
-    if (oppMembershipLevelVals) oppMembershipLevelVals[i][0] = (opponentObj.membershipLevel != null) ? opponentObj.membershipLevel : oppMembershipLevelVals[i][0];
-    if (oppCountryVals) oppCountryVals[i][0] = opponentObj.countryName || oppCountryVals[i][0];
-    if (oppAvatarVals) oppAvatarVals[i][0] = opponentObj.avatarUrl || oppAvatarVals[i][0];
-    if (myMembershipCodeVals) myMembershipCodeVals[i][0] = myObj.membershipCode || myMembershipCodeVals[i][0];
-    if (myMembershipLevelVals) myMembershipLevelVals[i][0] = (myObj.membershipLevel != null) ? myObj.membershipLevel : myMembershipLevelVals[i][0];
+    if (oppMembershipCodeVals && String(oppMembershipCodeVals[i][0] || '').trim() === '' && opponentObj.membershipCode) oppMembershipCodeVals[i][0] = opponentObj.membershipCode;
+    if (oppMembershipLevelVals && String(oppMembershipLevelVals[i][0] || '').trim() === '' && (opponentObj.membershipLevel != null)) oppMembershipLevelVals[i][0] = opponentObj.membershipLevel;
+    if (oppCountryVals && String(oppCountryVals[i][0] || '').trim() === '' && opponentObj.countryName) oppCountryVals[i][0] = opponentObj.countryName;
+    if (oppAvatarVals && String(oppAvatarVals[i][0] || '').trim() === '' && opponentObj.avatarUrl) oppAvatarVals[i][0] = opponentObj.avatarUrl;
+    if (myMembershipCodeVals && String(myMembershipCodeVals[i][0] || '').trim() === '' && myObj.membershipCode) myMembershipCodeVals[i][0] = myObj.membershipCode;
+    if (myMembershipLevelVals && String(myMembershipLevelVals[i][0] || '').trim() === '' && (myObj.membershipLevel != null)) myMembershipLevelVals[i][0] = myObj.membershipLevel;
 
     processed++;
   }
@@ -1452,18 +1470,7 @@ function runCallbackOthersBatchToCompletion() {
     if (a < BATCH_SIZE) break;
     Utilities.sleep(THROTTLE_SLEEP_MS);
   }
-  // ECO & Opening
-  while (true) {
-    var b = backfillEcoAndOpening(BATCH_SIZE);
-    if (b < BATCH_SIZE) break;
-    Utilities.sleep(THROTTLE_SLEEP_MS);
-  }
-  // Other callback fields (headers subset guarded by flag)
-  while (true) {
-    var c = backfillCallbackFields(BATCH_SIZE);
-    if (c < BATCH_SIZE) break;
-    Utilities.sleep(THROTTLE_SLEEP_MS);
-  }
+  // Skip ECO & Opening and other non-callback-only fields here by design
 }
 
 /**
@@ -1532,4 +1539,100 @@ function parseClockToSeconds(clock) {
 
   if (!isFinite(seconds) || !isFinite(minutes) || !isFinite(hours)) return NaN;
   return (hours * 3600) + (minutes * 60) + seconds;
+}
+
+/**
+ * Backfill "My rating pregame_derived" as the latest prior "My rating" for the same Format.
+ * For each row, find the most recent earlier row (by Timestamp) whose Format equals this row's Format,
+ * and set derived = that row's My rating. Only fills empty cells, never overwrites.
+ * @param {number=} limit Optional max rows to process
+ * @return {number} number of rows updated
+ */
+function backfillMyRatingPregameDerived(limit) {
+  const sheet = ensureSheet();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+
+  const lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var headerToIndex = {};
+  for (var c = 0; c < headers.length; c++) headerToIndex[headers[c]] = c + 1;
+
+  var colTimestamp = headerToIndex['Timestamp'] || 1;
+  var colFormat = headerToIndex['Format'];
+  var colMyRating = headerToIndex['My rating'];
+  var colDerived = headerToIndex['My rating pregame_derived'];
+  if (!colFormat || !colMyRating || !colDerived) return 0;
+
+  var numRows = lastRow - 1;
+  var tsVals = sheet.getRange(2, colTimestamp, numRows, 1).getValues();
+  var fmtVals = sheet.getRange(2, colFormat, numRows, 1).getValues();
+  var myVals = sheet.getRange(2, colMyRating, numRows, 1).getValues();
+  var drvVals = sheet.getRange(2, colDerived, numRows, 1).getValues();
+
+  // Build indexes of rows by format with timestamps to allow binary search of prior max<current
+  var formatToRows = {};
+  for (var i = 0; i < numRows; i++) {
+    var f = String(fmtVals[i][0] || '').trim();
+    if (!formatToRows[f]) formatToRows[f] = [];
+    var t = tsVals[i][0];
+    var timeMs = (t instanceof Date) ? t.getTime() : (new Date(t)).getTime();
+    formatToRows[f].push({ idx: i, time: isFinite(timeMs) ? timeMs : 0 });
+  }
+  for (var key in formatToRows) {
+    formatToRows[key].sort(function(a, b) { return a.time - b.time; });
+  }
+
+  // Create mapping from row index to its position within sorted list for its format
+  var formatToSortedIndexes = {};
+  for (var fKey in formatToRows) {
+    var arr = formatToRows[fKey];
+    var posByIdx = {};
+    for (var p = 0; p < arr.length; p++) posByIdx[arr[p].idx] = p;
+    formatToSortedIndexes[fKey] = posByIdx;
+  }
+
+  // Determine candidate rows: derived empty
+  var candidates = [];
+  for (var r = 0; r < numRows; r++) {
+    if (String(drvVals[r][0] || '').trim() === '') candidates.push(r);
+  }
+  if (typeof limit === 'number' && isFinite(limit) && limit >= 0) {
+    candidates = candidates.slice(0, limit);
+  } else if (typeof BATCH_SIZE === 'number' && BATCH_SIZE > 0) {
+    candidates = candidates.slice(0, BATCH_SIZE);
+  }
+
+  var updated = 0;
+  for (var k = 0; k < candidates.length; k++) {
+    var rowIdx = candidates[k];
+    var f = String(fmtVals[rowIdx][0] || '').trim();
+    var arr = formatToRows[f] || [];
+    var pos = (formatToSortedIndexes[f] && formatToSortedIndexes[f][rowIdx] != null) ? formatToSortedIndexes[f][rowIdx] : -1;
+    if (pos <= 0) continue; // no earlier row
+    // find prior position with valid My rating
+    for (var q = pos - 1; q >= 0; q--) {
+      var priorIdx = arr[q].idx;
+      var priorRating = Number(myVals[priorIdx][0]);
+      if (isFinite(priorRating)) {
+        drvVals[rowIdx][0] = priorRating;
+        updated++;
+        break;
+      }
+    }
+  }
+
+  if (updated > 0) sheet.getRange(2, colDerived, numRows, 1).setValues(drvVals);
+  return updated;
+}
+
+/**
+ * Runs backfillMyRatingPregameDerived repeatedly until completion.
+ */
+function runMyRatingPregameDerivedToCompletion() {
+  while (true) {
+    var n = backfillMyRatingPregameDerived(BATCH_SIZE);
+    if (n < BATCH_SIZE) break;
+    Utilities.sleep(THROTTLE_SLEEP_MS);
+  }
 }
