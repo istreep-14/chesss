@@ -3,7 +3,6 @@
 // plus WhiteAccuracy, BlackAccuracy, Result, and extended metrics computed from [%eval]s
 // in a Google Sheet. This relies solely on PGN tags: [Opening "..."] and [ECO "..."]
 
-const SHEET_NAME = 'Games';
 const SCRIPT_PROP_MY_USERNAME_KEY = 'MY_USERNAME';
 
 // Column indices (1-based)
