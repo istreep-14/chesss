@@ -18,10 +18,14 @@ function setupSheet() {
       'Color',
       'Opponent',
       'Opponent rating',
+      'My rating',
       'Result',
       'Reason',
       'FEN',
-      'Endboard URL'
+      'Endboard URL',
+      'ECO',
+      'Opening URL',
+      'Moves'
     ]);
   }
 }
@@ -162,10 +166,14 @@ function buildRow(details) {
     details.color,                    // Color
     details.opponentUsername,         // Opponent
     details.opponentRating || '',     // Opponent rating
+    details.myRating || '',           // My rating
     details.result,                   // Result
     details.reason,                   // Reason
     details.fen,                      // FEN
-    details.imageUrl                  // Endboard URL
+    details.imageUrl,                 // Endboard URL
+    details.eco || '',                // ECO
+    details.openingUrl || '',         // Opening URL
+    details.moves || ''               // Moves (PGN movetext)
   ];
 }
 
@@ -206,6 +214,34 @@ function normalizeGame(game) {
 
   var endTime = game.end_time ? new Date(game.end_time * 1000) : new Date();
 
+  // Parse PGN tags for ECO, Opening URL, and get movetext (moves)
+  var eco = '';
+  var openingUrl = '';
+  var moves = '';
+  if (game.pgn) {
+    try {
+      var pgn = String(game.pgn);
+      // Extract tags like [ECO "B01"] and [OpeningUrl "..."] or [Opening "..."]
+      var ecoMatch = pgn.match(/\n\[ECO\s+"([^"]+)"\]/);
+      if (ecoMatch && ecoMatch[1]) eco = ecoMatch[1];
+      var openingUrlMatch = pgn.match(/\n\[OpeningUrl\s+"([^"]+)"\]/);
+      if (openingUrlMatch && openingUrlMatch[1]) openingUrl = openingUrlMatch[1];
+      // Some PGNs may not have OpeningUrl; chess.com often has a URL in the JSON opening_url
+      if (!openingUrl && game.opening_url) openingUrl = game.opening_url;
+      // Extract movetext: content after the last closing bracket line of headers
+      var splitIndex = pgn.lastIndexOf(']\n');
+      if (splitIndex !== -1) {
+        var afterHeaders = pgn.substring(splitIndex + 2);
+        // Remove leading newlines/spaces
+        afterHeaders = afterHeaders.replace(/^\s+/, '');
+        // Remove result token at end (e.g., 1-0, 0-1, 1/2-1/2, *), if present
+        moves = afterHeaders.replace(/\s+(1-0|0-1|1\/2-1\/2|\*)\s*$/m, '');
+      }
+    } catch (e) {
+      // ignore PGN parse issues
+    }
+  }
+
   return {
     isPlayerInGame: true,
     timestamp: endTime,
@@ -217,10 +253,14 @@ function normalizeGame(game) {
     color: color,
     opponentUsername: opponent && opponent.username ? opponent.username : 'Unknown',
     opponentRating: opponent && opponent.rating ? opponent.rating : '',
+    myRating: side && side.rating ? side.rating : '',
     result: result,
     reason: reason,
     fen: fen,
-    imageUrl: imageUrl
+    imageUrl: imageUrl,
+    eco: eco,
+    openingUrl: openingUrl,
+    moves: moves
   };
 }
 
