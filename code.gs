@@ -131,7 +131,6 @@ function ensureSheet() {
       'Opponent',
       'Opponent rating',
       'My rating',
-      'Rating change',
       'Result',
       'Reason',
       'FEN',
@@ -175,21 +174,7 @@ function ensureSheet() {
     sheet.getRange(1, updatedLastCol + 1, 1, toAdd.length).setValues([toAdd]);
   }
 
-  // Ensure Rating change exists; prefer to insert after "My rating"
-  updatedLastCol = sheet.getLastColumn();
-  headers = sheet.getRange(1, 1, 1, updatedLastCol).getValues()[0];
-  var ratingChangeIdx = headers.indexOf('Rating change');
-  if (ratingChangeIdx === -1) {
-    var myRatingIdx = headers.indexOf('My rating');
-    if (myRatingIdx !== -1) {
-      sheet.insertColumnsAfter(myRatingIdx + 1, 1);
-      sheet.getRange(1, myRatingIdx + 2).setValue('Rating change');
-    } else {
-      var last = sheet.getLastColumn();
-      sheet.insertColumnsAfter(last, 1);
-      sheet.getRange(1, last + 1).setValue('Rating change');
-    }
-  }
+  // Skip adding legacy "Rating change" column
 
   // Ensure Moves (SAN) and Clocks exist if sheet had neither
   updatedLastCol = sheet.getLastColumn();
@@ -210,21 +195,6 @@ function ensureSheet() {
   var extraHeaders = [
     'White rating change',
     'Black rating change',
-    'Is live game',
-    'Is abortable',
-    'Is analyzable',
-    'Is resignable',
-    'Is checkmate',
-    'Is stalemate',
-    'Is finished',
-    'Can send trophy',
-    'Changes players rating',
-    'Allow vacation',
-    'Game UUID',
-    'Turn color',
-    'Ply count',
-    'Initial setup',
-    'Type name',
     'Opponent membership code',
     'Opponent membership level',
     'Opponent country',
@@ -251,7 +221,23 @@ function ensureSheet() {
     'Move list',
     'Last move',
     'Base time (s)',
-    'Increment (s)'
+    'Increment (s)',
+    'Rating change',
+    'Is live game',
+    'Is abortable',
+    'Is analyzable',
+    'Is resignable',
+    'Is checkmate',
+    'Is stalemate',
+    'Is finished',
+    'Can send trophy',
+    'Changes players rating',
+    'Allow vacation',
+    'Game UUID',
+    'Turn color',
+    'Ply count',
+    'Initial setup',
+    'Type name'
   ];
   headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var removeCols = [];
@@ -304,7 +290,6 @@ function buildRow(details) {
     details.opponentUsername,         // Opponent
     details.opponentRating || '',     // Opponent rating
     details.myRating || '',           // My rating
-    '',                               // Rating change (placeholder)
     details.result,                   // Result
     details.reason,                   // Reason
     details.fen,                      // FEN
