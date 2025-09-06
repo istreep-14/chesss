@@ -886,6 +886,7 @@ function backfillCallbackFields(limit) {
   setCol(colMyMembershipCode, myMembershipCodeVals);
   setCol(colMyMembershipLevel, myMembershipLevelVals);
 }
+/**
  * Convenience: backfill both ECO/Opening and Moves/Clocks.
  * @param {number=} limit Optional max rows for each pass
  */
