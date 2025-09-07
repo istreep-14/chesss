@@ -257,9 +257,11 @@ function ensureSheet() {
       'Color',
       'Opponent',
       'Opponent rating',
+      'Opponent rating pregame_formula',
       'Opponent rating pregame',
       'Opponent rating change',
       'My rating',
+      'My rating pregame_formula',
       'My rating pregame',
       'My rating pregame_derived',
       'My rating change',
@@ -273,7 +275,15 @@ function ensureSheet() {
       'Moves (SAN)',
       'Clocks',
       'Clock Seconds',
-      'Move Times'
+      'Move Times',
+      'White rating change',
+      'Black rating change',
+      'Opponent membership code',
+      'Opponent membership level',
+      'Opponent country',
+      'Opponent avatar URL',
+      'My membership code',
+      'My membership level'
     ]);
     return sheet;
   }
@@ -510,9 +520,11 @@ function buildRow(details) {
     details.color,                    // Color
     details.opponentUsername,         // Opponent
     details.opponentRating || '',     // Opponent rating
+    '',                               // Opponent rating pregame_formula (backfilled)
     '',                               // Opponent rating pregame (backfilled)
     '',                               // Opponent rating change (backfilled)
     details.myRating || '',           // My rating
+    '',                               // My rating pregame_formula (backfilled)
     '',                               // My rating pregame (backfilled)
     '',                               // My rating pregame_derived (backfilled)
     '',                               // My rating change (backfilled)
