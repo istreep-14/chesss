@@ -34,17 +34,18 @@ function setupVersion2() {
 
   // Prepare Headers sheet
   headersSheet.clear();
-  var headerRow = [['Enabled', 'Order', 'Field', 'Source']];
+  var headerRow = [['Enabled', 'Order', 'Field', 'Source', 'Display Name', 'Description', 'Example', 'Input']];
   headersSheet.getRange(1, 1, 1, headerRow[0].length).setValues(headerRow);
   headersSheet.setFrozenRows(1);
   headersSheet.autoResizeColumns(1, headerRow[0].length);
 
   var catalog = buildHeaderCatalog_();
   var values = catalog.map(function(entry) {
-    return [false, '', entry.field, entry.source];
+    var display = prettifyFieldName_(entry.field, entry.source);
+    return [false, '', entry.field, entry.source, display, '', '', ''];
   });
   if (values.length > 0) {
-    headersSheet.getRange(2, 1, values.length, 4).setValues(values);
+    headersSheet.getRange(2, 1, values.length, 8).setValues(values);
     headersSheet.getRange(2, 1, values.length, 1).insertCheckboxes();
   }
 
@@ -140,8 +141,8 @@ function fetchGamesToSheet_(username, year, month) {
     return;
   }
 
-  // Prepare header row in Games sheet using the selected field keys
-  var headerRow = [selectedHeaders.map(function(h) { return h.field; })];
+  // Prepare header row in Games sheet using display names if provided
+  var headerRow = [selectedHeaders.map(function(h) { return h.displayName || h.field; })];
   gamesSheet.clear();
   gamesSheet.getRange(1, 1, 1, headerRow[0].length).setValues(headerRow);
   gamesSheet.setFrozenRows(1);
@@ -178,21 +179,35 @@ function fetchGamesToSheet_(username, year, month) {
 /**
  * Reads selected headers from the Headers sheet, sorting by Order ascending.
  * @param {GoogleAppsScript.Spreadsheet.Sheet} headersSheet
- * @return {Array<{field:string, source:string, order:number}>}
+ * @return {Array<{field:string, source:string, order:number, displayName:string}>}
  */
 function readSelectedHeaders_(headersSheet) {
   var lastRow = headersSheet.getLastRow();
   if (lastRow < 2) {
     return [];
   }
-  var range = headersSheet.getRange(2, 1, lastRow - 1, 4);
+  var lastCol = headersSheet.getLastColumn();
+  var headerNames = headersSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  function colIndexByName_(name) {
+    for (var i = 0; i < headerNames.length; i++) {
+      if (String(headerNames[i]).trim() === name) return i;
+    }
+    return -1;
+  }
+  var colEnabled = colIndexByName_('Enabled');
+  var colOrder = colIndexByName_('Order');
+  var colField = colIndexByName_('Field');
+  var colSource = colIndexByName_('Source');
+  var colDisplay = colIndexByName_('Display Name');
+  var range = headersSheet.getRange(2, 1, lastRow - 1, lastCol);
   var values = range.getValues();
   var selected = [];
   for (var i = 0; i < values.length; i++) {
-    var enabled = values[i][0];
-    var orderRaw = values[i][1];
-    var field = String(values[i][2] || '').trim();
-    var source = String(values[i][3] || '').trim();
+    var enabled = colEnabled >= 0 ? values[i][colEnabled] : values[i][0];
+    var orderRaw = colOrder >= 0 ? values[i][colOrder] : values[i][1];
+    var field = String((colField >= 0 ? values[i][colField] : values[i][2]) || '').trim();
+    var source = String((colSource >= 0 ? values[i][colSource] : values[i][3]) || '').trim();
+    var displayName = String((colDisplay >= 0 ? values[i][colDisplay] : '') || '').trim();
     if (!enabled || !field || !source) {
       continue;
     }
@@ -200,7 +215,7 @@ function readSelectedHeaders_(headersSheet) {
     if (isNaN(order)) {
       order = Number.POSITIVE_INFINITY;
     }
-    selected.push({ field: field, source: source, order: order, rowIndex: i });
+    selected.push({ field: field, source: source, order: order, displayName: displayName, rowIndex: i });
   }
   // Stable sort: primary by order ascending, secondary by original row index
   selected.sort(function(a, b) {
@@ -366,5 +381,31 @@ function buildHeaderCatalog_() {
   fields.push({ field: 'Moves', source: 'pgn_moves' });
 
   return fields;
+}
+
+/**
+ * Generates a human-friendly display name for a field path.
+ * Examples:
+ *  - "white.username" -> "White Username"
+ *  - "accuracies.white" -> "Accuracies White"
+ *  - PGN tag sources keep the tag as-is
+ * @param {string} field
+ * @param {string} source
+ * @return {string}
+ */
+function prettifyFieldName_(field, source) {
+  if (!field) return '';
+  if (source === 'pgn') {
+    return field;
+  }
+  var parts = String(field)
+    .replace(/[@\[\]]/g, '')
+    .split(/[._]/)
+    .filter(function(p) { return p && p.length; });
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i];
+    parts[i] = p.charAt(0).toUpperCase() + p.slice(1).replace(/([a-z])([A-Z])/g, '$1 $2');
+  }
+  return parts.join(' ');
 }
 
