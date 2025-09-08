@@ -9,6 +9,9 @@ function onOpen() {
     SpreadsheetApp.getUi()
       .createMenu('Opening Info')
       .addItem('Build for selected row', 'buildOpeningInfoForSelectedRow')
+      .addSeparator()
+      .addItem('Setup Config sheet', 'setupConfig')
+      .addItem('Run configured fetch', 'runConfiguredFetch')
       .addToUi();
   } catch (e) {
     // UI may not be available in some contexts
