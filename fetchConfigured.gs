@@ -188,6 +188,11 @@ function recalcDerivedV2_(headersSheet, gamesSheet, selectedHeaders) {
   var idxTimeControl = selectedHeaders.findIndex(function(h) { return h.source === 'json' && h.field === 'time_control'; });
   var idxPgn = selectedHeaders.findIndex(function(h) { return h.source === 'json' && h.field === 'pgn'; });
   var idxMoves = selectedHeaders.findIndex(function(h) { return h.source === 'pgn_moves'; });
+  // Additional JSON fields needed for derived computations during recalc
+  var idxEndTime = selectedHeaders.findIndex(function(h) { return h.source === 'json' && h.field === 'end_time'; });
+  var idxRules = selectedHeaders.findIndex(function(h) { return h.source === 'json' && h.field === 'rules'; });
+  var idxTimeClass = selectedHeaders.findIndex(function(h) { return h.source === 'json' && h.field === 'time_class'; });
+  var idxFen = selectedHeaders.findIndex(function(h) { return h.source === 'json' && h.field === 'fen'; });
 
   var values = gamesSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   var derivedReg = getDerivedRegistry_();
@@ -197,6 +202,10 @@ function recalcDerivedV2_(headersSheet, gamesSheet, selectedHeaders) {
     // Minimal inputs for compute()
     var game = {};
     if (idxTimeControl !== -1) game.time_control = row[idxTimeControl];
+    if (idxEndTime !== -1) game.end_time = row[idxEndTime];
+    if (idxRules !== -1) game.rules = row[idxRules];
+    if (idxTimeClass !== -1) game.time_class = row[idxTimeClass];
+    if (idxFen !== -1) game.fen = row[idxFen];
     var pgnText = idxPgn !== -1 ? String(row[idxPgn] || '') : '';
     var pgnTags = parsePgnTags_(pgnText);
     var pgnMoves = idxMoves !== -1 ? String(row[idxMoves] || '') : '';
