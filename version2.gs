@@ -572,7 +572,10 @@ function getDerivedRegistry_() {
 
   function clocksToSecondsList_(clocks) {
     if (!clocks || !clocks.length) return [];
-    return clocks.map(function(c){ var n = parseHmsToSeconds_(c); return (n != null ? n : ''); });
+    return clocks.map(function(c){
+      var n = parseHmsToSeconds_(c);
+      return (typeof n === 'number' && isFinite(n)) ? n : null;
+    });
   }
 
   // --- SAN moves helpers ---
@@ -624,20 +627,20 @@ function getDerivedRegistry_() {
     var black = [];
     for (var i = 0; i < clockSecondsList.length; i++) {
       var v = clockSecondsList[i];
-      if (!isFinite(v)) { if (i % 2 === 0) white.push(null); else black.push(null); continue; }
+      if (typeof v !== 'number' || !isFinite(v)) { if (i % 2 === 0) white.push(null); else black.push(null); continue; }
       if (i % 2 === 0) white.push(v); else black.push(v);
     }
     function durationsFor(seq) {
       var out = [];
       for (var i = 0; i < seq.length; i++) {
         var curr = seq[i];
-        if (curr == null) { out.push(''); continue; }
+        if (typeof curr !== 'number' || !isFinite(curr)) { out.push(''); continue; }
         if (i === 0) {
           var d0 = Math.max(0, baseSec - curr + incSec);
           out.push(Math.round(d0 * 100) / 100);
         } else {
           var prev = seq[i-1];
-          if (prev == null) { out.push(''); continue; }
+          if (typeof prev !== 'number' || !isFinite(prev)) { out.push(''); continue; }
           var di = Math.max(0, prev - curr + incSec);
           out.push(Math.round(di * 100) / 100);
         }
@@ -724,8 +727,8 @@ function getDerivedRegistry_() {
     displayName: 'Clocks',
     description: 'Clock tags extracted from PGN, in original format',
     example: '{5:00, 5:00, 4:58, ...}',
-    compute: function(game) {
-      var pgn = (game && game.pgn) || '';
+    compute: function(game, pgnTags, pgnMoves) {
+      var pgn = (pgnMoves && String(pgnMoves)) || (game && game.pgn) || '';
       var clocks = extractClocksFromPgn_(pgn);
       return listToBracedString_(clocks);
     }
@@ -735,8 +738,8 @@ function getDerivedRegistry_() {
     displayName: 'Clock Seconds',
     description: 'Clock tags converted to seconds',
     example: '{300, 300, 298, ...}',
-    compute: function(game) {
-      var pgn = (game && game.pgn) || '';
+    compute: function(game, pgnTags, pgnMoves) {
+      var pgn = (pgnMoves && String(pgnMoves)) || (game && game.pgn) || '';
       var clocks = extractClocksFromPgn_(pgn);
       var secs = clocksToSecondsList_(clocks);
       return listToBracedString_(secs);
@@ -747,11 +750,11 @@ function getDerivedRegistry_() {
     displayName: 'Clock Seconds_Incriment',
     description: 'Per-ply durations including increment (legacy label)',
     example: '{2, 2, 3, ...}',
-    compute: function(game) {
-      var pgn = (game && game.pgn) || '';
+    compute: function(game, pgnTags, pgnMoves) {
+      var pgn = (pgnMoves && String(pgnMoves)) || (game && game.pgn) || '';
       var clocks = extractClocksFromPgn_(pgn);
       var secs = clocksToSecondsList_(clocks);
-      var tc = (game && game.time_control) || '';
+      var tc = (game && game.time_control) || (pgnTags && pgnTags['TimeControl']) || '';
       var parsed = parseTimeControlString_(tc);
       var durations = buildMoveDurations_(secs, parsed.initialSec, parsed.incrementSec);
       return listToBracedString_(durations);
