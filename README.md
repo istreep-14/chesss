@@ -1,9 +1,9 @@
 ## Chess.com -> Google Sheets (Version 2)
 
-Version 2 is the active implementation. Use `version2.gs` and `config.gs`. Older `.gs` files in this repo are legacy and kept only for ideas/reference; Version 2 does not call or depend on them.
+Version 2 is the active implementation. Use `version2.gs`, `config.gs`, and `fetchConfigured.gs`. Older `.gs` files in this repo are legacy and kept only for ideas/reference; Version 2 does not call or depend on them.
 
 Quick start (V2):
-- Open your spreadsheet’s Apps Script editor and add `version2.gs` and `config.gs`.
+- Open your spreadsheet’s Apps Script editor and add `version2.gs`, `config.gs`, and `fetchConfigured.gs`.
 - Reload the spreadsheet to see the "Version 2" menu, then:
   - "Setup sheets and headers" to create `Headers` and `Games`
   - "Setup Config sheet" to create `Config`
