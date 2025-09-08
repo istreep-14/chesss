@@ -417,12 +417,12 @@ function getDerivedRegistry_() {
   // Helper to parse time control strings like "300+0", "600+5", or "600"
   function parseTimeControlString_(tc) {
     var s = String(tc || '').trim();
-    if (!s || s === '-') return { initialSec: '', incrementSec: '' };
+    if (!s || s === '-') return { initialSec: null, incrementSec: null };
     var parts = s.split('+');
     var initialSec = parseInt(parts[0], 10);
     var incrementSec = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-    if (!isFinite(initialSec)) initialSec = '';
-    if (!isFinite(incrementSec)) incrementSec = '';
+    if (!isFinite(initialSec)) initialSec = null;
+    if (!isFinite(incrementSec)) incrementSec = null;
     return { initialSec: initialSec, incrementSec: incrementSec };
   }
 
@@ -532,11 +532,20 @@ function getDerivedRegistry_() {
   function parseHmsToSeconds_(s) {
     var t = String(s || '').trim();
     if (!t) return null;
-    var parts = t.split(':').map(function(p){ return parseInt(p, 10); });
-    if (parts.length === 3 && parts.every(function(n){return isFinite(n);} )) return parts[0]*3600 + parts[1]*60 + parts[2];
-    if (parts.length === 2 && parts.every(function(n){return isFinite(n);} )) return parts[0]*60 + parts[1];
-    var n = parseInt(t, 10);
-    return isFinite(n) ? n : null;
+    // Support fractional seconds like 0:02:59.9
+    var rawParts = t.split(':');
+    if (rawParts.length < 2) {
+      var nOnly = parseFloat(t);
+      return isFinite(nOnly) ? nOnly : null;
+    }
+    var secondsPart = rawParts.pop();
+    var minutesPart = rawParts.pop();
+    var hoursPart = rawParts.length > 0 ? rawParts.pop() : '0';
+    var seconds = parseFloat(String(secondsPart).replace(/[^0-9\.]/g, ''));
+    var minutes = parseInt(minutesPart, 10);
+    var hours = parseInt(hoursPart, 10);
+    if (!isFinite(seconds) || !isFinite(minutes) || !isFinite(hours)) return null;
+    return hours * 3600 + minutes * 60 + seconds;
   }
 
   function computeGameLengthSecondsFromPgn_(pgnTags) {
@@ -550,7 +559,7 @@ function getDerivedRegistry_() {
   }
 
   function extractClocksFromPgn_(pgnText) {
-    var re = /\[%clk\s+([0-9:]+)\]/g;
+    var re = /\[%clk\s+([^\]]+)\]/g;
     var clocks = [];
     if (!pgnText) return clocks;
     var m;
@@ -583,11 +592,13 @@ function getDerivedRegistry_() {
         var curr = seq[i];
         if (curr == null) { out.push(''); continue; }
         if (i === 0) {
-          out.push(Math.max(0, baseSec - curr + incSec));
+          var d0 = Math.max(0, baseSec - curr + incSec);
+          out.push(Math.round(d0 * 100) / 100);
         } else {
           var prev = seq[i-1];
           if (prev == null) { out.push(''); continue; }
-          out.push(Math.max(0, prev - curr + incSec));
+          var di = Math.max(0, prev - curr + incSec);
+          out.push(Math.round(di * 100) / 100);
         }
       }
       return out;
