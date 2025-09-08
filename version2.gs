@@ -154,6 +154,7 @@ function fetchGamesToSheet_(username, year, month) {
     var pgnText = (game && game.pgn) ? String(game.pgn) : '';
     var pgnTags = parsePgnTags_(pgnText);
     var pgnMoves = parsePgnMoves_(pgnText);
+    var derivedReg = null; // lazy init so we do it once per fetch
 
     var row = selectedHeaders.map(function(h) {
       if (h.source === 'json') {
@@ -164,6 +165,23 @@ function fetchGamesToSheet_(username, year, month) {
       }
       if (h.source === 'pgn_moves') {
         return pgnMoves;
+      }
+      if (h.source === 'derived') {
+        if (!derivedReg) derivedReg = getDerivedRegistry_();
+        var def = derivedReg[h.field];
+        if (def && typeof def.compute === 'function') {
+          try {
+            var v = def.compute(game, pgnTags, pgnMoves);
+            // Normalize objects to JSON for safety
+            if (v != null && typeof v === 'object') {
+              try { return JSON.stringify(v); } catch (e) { return ''; }
+            }
+            return (v != null ? v : '');
+          } catch (e) {
+            return '';
+          }
+        }
+        return '';
       }
       return '';
     });
@@ -370,6 +388,129 @@ function buildHeaderCatalog_() {
   // Moves block (SAN notation after the PGN tags)
   fields.push({ field: 'Moves', source: 'pgn_moves' });
 
+  // Derived fields (computed in code via registry)
+  var derived = getDerivedRegistry_();
+  Object.keys(derived).forEach(function(key) {
+    var def = derived[key] || {};
+    fields.push({
+      field: key,
+      source: 'derived',
+      displayName: def.displayName || key,
+      description: def.description || '',
+      example: def.example || ''
+    });
+  });
+
   return fields;
+}
+
+
+/**
+ * Registry of derived fields computed in code (no spreadsheet formulas).
+ * Each entry defines a compute(game, pgnTags, pgnMoves) function returning a scalar value.
+ * @return {!Object<string,{displayName:string, description:string, example:*, compute:function(Object,Object,string):*}>}
+ */
+function getDerivedRegistry_() {
+  // Helper to parse time control strings like "300+0", "600+5", or "600"
+  function parseTimeControlString_(tc) {
+    var s = String(tc || '').trim();
+    if (!s || s === '-') return { initialSec: '', incrementSec: '' };
+    var parts = s.split('+');
+    var initialSec = parseInt(parts[0], 10);
+    var incrementSec = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+    if (!isFinite(initialSec)) initialSec = '';
+    if (!isFinite(incrementSec)) incrementSec = '';
+    return { initialSec: initialSec, incrementSec: incrementSec };
+  }
+
+  function classifySpeed_(initialSec, incrementSec) {
+    if (initialSec === '' || initialSec == null) return '';
+    var inc = incrementSec || 0;
+    var base = Number(initialSec) + Number(inc) * 40;
+    if (base < 180) return 'bullet';
+    if (base < 480) return 'blitz';
+    if (base < 1500) return 'rapid';
+    return 'classical';
+  }
+
+  // Compute functions
+  var registry = {
+    result_numeric: {
+      displayName: 'Result (Numeric)',
+      description: '1 (white win), 0.5 (draw), 0 (black win) from PGN Result',
+      example: 1,
+      compute: function(game, pgnTags, pgnMoves) {
+        var r = String((pgnTags && pgnTags['Result']) || '').trim();
+        if (r === '1-0') return 1;
+        if (r === '0-1') return 0;
+        if (r === '1/2-1/2') return 0.5;
+        return '';
+      }
+    },
+    moves_count: {
+      displayName: 'Moves (count)',
+      description: 'Approximate number of full moves in PGN',
+      example: 32,
+      compute: function(game, pgnTags, pgnMoves) {
+        var text = String(pgnMoves || '');
+        if (!text) return '';
+        var matches = text.match(/\b\d+\./g);
+        return matches ? matches.length : '';
+      }
+    },
+    plies: {
+      displayName: 'Plies',
+      description: 'Approximate number of half-moves (plies)',
+      example: 64,
+      compute: function(game, pgnTags, pgnMoves) {
+        var moves = registry.moves_count.compute(game, pgnTags, pgnMoves);
+        if (moves === '' || moves == null) return '';
+        // Roughly two plies per move (may be off by 1 for unfinished last move)
+        return Number(moves) * 2;
+      }
+    },
+    initial_seconds: {
+      displayName: 'InitialSec',
+      description: 'Initial time (seconds) parsed from time control',
+      example: 300,
+      compute: function(game, pgnTags, pgnMoves) {
+        var tc = (game && game.time_control) || (pgnTags && pgnTags['TimeControl']) || '';
+        return parseTimeControlString_(tc).initialSec;
+      }
+    },
+    increment_seconds: {
+      displayName: 'Increment',
+      description: 'Increment (seconds) parsed from time control',
+      example: 0,
+      compute: function(game, pgnTags, pgnMoves) {
+        var tc = (game && game.time_control) || (pgnTags && pgnTags['TimeControl']) || '';
+        return parseTimeControlString_(tc).incrementSec;
+      }
+    },
+    speed_class: {
+      displayName: 'SpeedClass',
+      description: 'bullet / blitz / rapid / classical derived from time control',
+      example: 'blitz',
+      compute: function(game, pgnTags, pgnMoves) {
+        var tc = (game && game.time_control) || (pgnTags && pgnTags['TimeControl']) || '';
+        var parsed = parseTimeControlString_(tc);
+        return classifySpeed_(parsed.initialSec, parsed.incrementSec);
+      }
+    },
+    accuracy_diff: {
+      displayName: 'AccuracyDiff',
+      description: 'WhiteAccuracy - BlackAccuracy from PGN tags (if present)',
+      example: 3.2,
+      compute: function(game, pgnTags, pgnMoves) {
+        var w = parseFloat((pgnTags && pgnTags['WhiteAccuracy']) || '');
+        var b = parseFloat((pgnTags && pgnTags['BlackAccuracy']) || '');
+        if (!isFinite(w) || !isFinite(b)) return '';
+        // Keep one decimal like Chess.com UI typically shows
+        return Math.round((w - b) * 10) / 10;
+      }
+    }
+  };
+
+  return registry;
 }
 
