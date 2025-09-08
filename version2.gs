@@ -22,6 +22,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Setup Config sheet', 'setupConfig')
     .addItem('Run configured fetch (V2)', 'runConfiguredFetchV2')
+    .addItem('Enable Opening Info headers (all)', 'enableOpeningInfoHeaders_')
+    .addItem('Create Opening Info output sheet', 'createOpeningInfoOutputSheet_')
     .addSeparator()
     .addItem('Fetch games (prompt)', 'runFetchGamesPrompt')
     .addToUi();
@@ -55,6 +57,47 @@ function setupVersion2() {
   // Prepare Games sheet (empty now; columns will be created on fetch)
   gamesSheet.clear();
   gamesSheet.setFrozenRows(1);
+}
+
+/**
+ * Utility: enable all Opening Info derived headers in the Headers sheet.
+ */
+function enableOpeningInfoHeaders_() {
+  var headersSheet = getOrCreateSheet_(SHEET_HEADERS_NAME);
+  var lastRow = headersSheet.getLastRow();
+  if (lastRow < 2) return;
+  var values = headersSheet.getRange(2, 1, lastRow - 1, 8).getValues();
+  var any = false;
+  for (var i = 0; i < values.length; i++) {
+    var field = String(values[i][2] || '').trim();
+    var source = String(values[i][3] || '').trim();
+    if (source === 'derived' && /^openinfo_/i.test(field)) {
+      values[i][0] = true; // Enabled
+      if (!values[i][1]) values[i][1] = ''; // Order left blank for user ordering
+      any = true;
+    }
+  }
+  if (any) headersSheet.getRange(2, 1, lastRow - 1, 8).setValues(values);
+}
+
+/** Returns an ordered list of Opening Info header definitions. */
+function listOpeningInfoHeaders_() {
+  var reg = {};
+  try { reg = getOpeningInfoDerivedRegistry_(); } catch (e) { reg = {}; }
+  var keys = Object.keys(reg);
+  keys.sort();
+  return keys.map(function(k){ var d = reg[k] || {}; return { field: k, displayName: d.displayName || k }; });
+}
+
+/** Creates or resets an 'Opening Info' sheet with all Opening Info headers. */
+function createOpeningInfoOutputSheet_() {
+  var sheet = getOrCreateSheet_('Opening Info');
+  sheet.clear();
+  var defs = listOpeningInfoHeaders_();
+  if (!defs.length) return;
+  var header = [defs.map(function(d){ return d.displayName; })];
+  sheet.getRange(1, 1, 1, header[0].length).setValues(header);
+  sheet.setFrozenRows(1);
 }
 
 /**
@@ -404,6 +447,21 @@ function buildHeaderCatalog_() {
       example: def.example || ''
     });
   });
+
+  // Opening Info derived headers (data group)
+  try {
+    var openReg = getOpeningInfoDerivedRegistry_();
+    Object.keys(openReg).forEach(function(key) {
+      var def = openReg[key] || {};
+      fields.push({
+        field: key,
+        source: 'derived',
+        displayName: def.displayName || key,
+        description: (def.description || '') + ' [Opening Info]',
+        example: def.example || ''
+      });
+    });
+  } catch (e) {}
 
   return fields;
 }
@@ -812,6 +870,11 @@ function getDerivedRegistry_() {
     }
   };
 
+  // Merge in Opening Info entries so they can be computed during fetch/recalc when enabled
+  try {
+    var openReg = getOpeningInfoDerivedRegistry_();
+    Object.keys(openReg).forEach(function(k) { registry[k] = openReg[k]; });
+  } catch (e) {}
   return registry;
 }
 
