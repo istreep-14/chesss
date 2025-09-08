@@ -301,7 +301,8 @@ function parsePgnMoves_(pgnText) {
   }
   var parts = String(pgnText).split(/\r?\n\r?\n/);
   if (parts.length < 2) {
-    return '';
+    // Fallback: if there is no tag section, treat the entire text as moves
+    return String(pgnText).trim();
   }
   // Join any additional sections in case of embedded comments
   var moves = parts.slice(1).join('\n\n').trim();
@@ -574,6 +575,46 @@ function getDerivedRegistry_() {
     return clocks.map(function(c){ var n = parseHmsToSeconds_(c); return (n != null ? n : ''); });
   }
 
+  // --- SAN moves helpers ---
+  function stripCurlyComments_(s) {
+    return String(s || '').replace(/\{[^}]*\}/g, ' ');
+  }
+
+  function stripSemicolonComments_(s) {
+    return String(s || '').replace(/;[^\n]*/g, '');
+  }
+
+  function stripNagAnnotations_(s) {
+    return String(s || '').replace(/\$\d+/g, '');
+  }
+
+  function removeMoveNumbers_(s) {
+    return String(s || '').replace(/\b\d+\.(?:\.\.)?/g, ' ');
+  }
+
+  function normalizeWhitespace_(s) {
+    return String(s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function extractSanPliesFromMoves_(movesText) {
+    var t = String(movesText || '');
+    if (!t) return [];
+    // Remove comments and annotations
+    t = stripCurlyComments_(t);
+    t = stripSemicolonComments_(t);
+    t = stripNagAnnotations_(t);
+    // Remove move numbers and results
+    t = removeMoveNumbers_(t);
+    t = t.replace(/\b(1-0|0-1|1\/2-1\/2|\*)\b/g, ' ');
+    // Normalize and split
+    t = normalizeWhitespace_(t);
+    if (!t) return [];
+    var tokens = t.split(' ');
+    // Filter ellipses and empties
+    tokens = tokens.filter(function(tok) { return tok && tok !== '...' && tok !== '..'; });
+    return tokens;
+  }
+
   function buildMoveDurations_(clockSecondsList, baseSec, incSec) {
     if (!clockSecondsList || !clockSecondsList.length) return [];
     var can = (baseSec != null && incSec != null && isFinite(baseSec) && isFinite(incSec));
@@ -670,10 +711,13 @@ function getDerivedRegistry_() {
   };
 
   registry.moves_san_list = {
-    displayName: 'Moves (SAN)',
-    description: 'SAN moves block from PGN',
-    example: '1. e4 e5 2. Nf3 Nc6 ...',
-    compute: function(game, pgnTags, pgnMoves) { return pgnMoves || ''; }
+    displayName: 'Moves (SAN list)',
+    description: 'List of SAN plies (no comments/clock/NAG/move numbers)',
+    example: '{e4, e5, Nf3, Nc6, ...}',
+    compute: function(game, pgnTags, pgnMoves) {
+      var plies = extractSanPliesFromMoves_(pgnMoves);
+      return listToBracedString_(plies);
+    }
   };
 
   registry.clocks_list = {
