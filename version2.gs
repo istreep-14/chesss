@@ -34,17 +34,18 @@ function setupVersion2() {
 
   // Prepare Headers sheet
   headersSheet.clear();
-  var headerRow = [['Enabled', 'Order', 'Field', 'Source']];
+  var headerRow = [['Enabled', 'Order', 'Field', 'Source', 'Display Name', 'Description', 'Example', 'Input']];
   headersSheet.getRange(1, 1, 1, headerRow[0].length).setValues(headerRow);
   headersSheet.setFrozenRows(1);
   headersSheet.autoResizeColumns(1, headerRow[0].length);
 
   var catalog = buildHeaderCatalog_();
   var values = catalog.map(function(entry) {
-    return [false, '', entry.field, entry.source];
+    // Default Display Name to the field; leave Description, Example, and Input blank for user to fill
+    return [false, '', entry.field, entry.source, (entry.displayName || entry.field), (entry.description || ''), (entry.example || ''), ''];
   });
   if (values.length > 0) {
-    headersSheet.getRange(2, 1, values.length, 4).setValues(values);
+    headersSheet.getRange(2, 1, values.length, 8).setValues(values);
     headersSheet.getRange(2, 1, values.length, 1).insertCheckboxes();
   }
 
@@ -140,8 +141,8 @@ function fetchGamesToSheet_(username, year, month) {
     return;
   }
 
-  // Prepare header row in Games sheet using the selected field keys
-  var headerRow = [selectedHeaders.map(function(h) { return h.field; })];
+  // Prepare header row in Games sheet using the selected display names (fallback to field)
+  var headerRow = [selectedHeaders.map(function(h) { return h.displayName || h.field; })];
   gamesSheet.clear();
   gamesSheet.getRange(1, 1, 1, headerRow[0].length).setValues(headerRow);
   gamesSheet.setFrozenRows(1);
@@ -185,7 +186,8 @@ function readSelectedHeaders_(headersSheet) {
   if (lastRow < 2) {
     return [];
   }
-  var range = headersSheet.getRange(2, 1, lastRow - 1, 4);
+  // Columns: Enabled, Order, Field, Source, Display Name, Description, Example, Input
+  var range = headersSheet.getRange(2, 1, lastRow - 1, 8);
   var values = range.getValues();
   var selected = [];
   for (var i = 0; i < values.length; i++) {
@@ -193,6 +195,9 @@ function readSelectedHeaders_(headersSheet) {
     var orderRaw = values[i][1];
     var field = String(values[i][2] || '').trim();
     var source = String(values[i][3] || '').trim();
+    var displayName = String(values[i][4] || '').trim();
+    // Description (5), Example (6) are informational; Input (7) optional for future parsing
+    var input = String(values[i][7] || '').trim();
     if (!enabled || !field || !source) {
       continue;
     }
@@ -200,7 +205,7 @@ function readSelectedHeaders_(headersSheet) {
     if (isNaN(order)) {
       order = Number.POSITIVE_INFINITY;
     }
-    selected.push({ field: field, source: source, order: order, rowIndex: i });
+    selected.push({ field: field, source: source, order: order, rowIndex: i, displayName: displayName, input: input });
   }
   // Stable sort: primary by order ascending, secondary by original row index
   selected.sort(function(a, b) {
