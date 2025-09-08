@@ -1,3 +1,19 @@
+## Chess.com -> Google Sheets (Version 2)
+
+Version 2 is the active implementation. Use `version2.gs` and `config.gs`. Older `.gs` files in this repo are legacy and kept only for ideas/reference; Version 2 does not call or depend on them.
+
+Quick start (V2):
+- Open your spreadsheet’s Apps Script editor and add `version2.gs` and `config.gs`.
+- Reload the spreadsheet to see the "Version 2" menu, then:
+  - "Setup sheets and headers" to create `Headers` and `Games`
+  - "Setup Config sheet" to create `Config`
+  - "Run configured fetch (V2)" to pull games per `Config`, or "Fetch games (prompt)" to run once
+
+Legacy note:
+- Legacy scripts and docs remain in this repository for reference only. See `LEGACY.md` for details.
+
+---
+
 ## PGN-based Opening Extraction for Google Sheets
 
 This project provides Apps Script utilities to import/analyze games on Lichess and parse opening information directly from the PGN export. It populates opening columns in a `Games` sheet using only the `[Opening]` and `[ECO]` tags.
