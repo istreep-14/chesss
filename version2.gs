@@ -20,6 +20,9 @@ function onOpen() {
   ui.createMenu(MENU_NAME)
     .addItem('Setup sheets and headers', 'setupVersion2')
     .addSeparator()
+    .addItem('Setup Config sheet', 'setupConfig')
+    .addItem('Run configured fetch (V2)', 'runConfiguredFetchV2')
+    .addSeparator()
     .addItem('Fetch games (prompt)', 'runFetchGamesPrompt')
     .addToUi();
 }
