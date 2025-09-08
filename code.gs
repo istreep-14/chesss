@@ -2,7 +2,17 @@
 // Configuration
 // =====================
 // Update values here to control behavior without touching the rest of the code.
-const PLAYER_USERNAME = 'frankscobey';
+// Player username is stored in Script Properties to avoid duplicate global const declarations.
+const SCRIPT_PROP_PLAYER_USERNAME_KEY = 'PLAYER_USERNAME';
+function setPlayerUsername(username) {
+  PropertiesService.getScriptProperties().setProperty(SCRIPT_PROP_PLAYER_USERNAME_KEY, String(username || '')); 
+}
+function getPlayerUsername() {
+  var p = PropertiesService.getScriptProperties().getProperty(SCRIPT_PROP_PLAYER_USERNAME_KEY);
+  var v = (p && String(p)) || '';
+  v = v.trim();
+  return v || 'frankscobey';
+}
 const SHEET_ID = '12zoMMkrkZz9WmhL4ds9lo8-91o-so337dOKwU3_yK3k';
 const SHEET_NAME = 'Games';
 
@@ -67,6 +77,63 @@ function getLichessAuthHeaders_(accept) {
 function setupSheet() {
   ensureSheet();
 }
+// =====================
+// Headers configuration
+// =====================
+const HEADERS = {
+  games: [
+    'Timestamp',
+    'URL',
+    'Game ID',
+    'Rated',
+    'Time class',
+    'Time control',
+    'Base time (s)',
+    'Increment (s)',
+    'Rules',
+    'Format',
+    'Color',
+    'Opponent',
+    'Opponent rating',
+    'Opponent rating pregame',
+    'Opponent rating change',
+    'My rating',
+    'My rating pregame',
+    'My rating pregame_derived',
+    'My rating change',
+    'Result',
+    'Result_Value',
+    'Reason',
+    'FEN',
+    'Endboard URL',
+    'ECO',
+    'Opening URL',
+    'Moves (SAN)',
+    'Clocks',
+    'Clock Seconds',
+    'Move Times'
+  ]
+};
+
+function ensureHeaders(sheet, headerKey, options) {
+  var desired = HEADERS[headerKey];
+  if (!desired) throw new Error('Unknown headerKey: ' + headerKey);
+  var range = sheet.getRange(1, 1, 1, desired.length);
+  var current = range.getValues()[0];
+  var isSame = desired.every(function(h, i) { return current[i] === h; });
+  if (!isSame) {
+    range.setValues([desired]);
+    var opts = options || {};
+    var freezeRows = (opts.freezeRows != null ? opts.freezeRows : 1);
+    if (freezeRows > 0) sheet.setFrozenRows(freezeRows);
+    range.setFontWeight('bold');
+  }
+  // return header → column index map (1-based)
+  var map = {};
+  for (var i = 0; i < desired.length; i++) map[desired[i]] = i + 1;
+  return map;
+}
+
 
 // Run this periodically via time-driven trigger (e.g., every 5–15 minutes)
 function syncRecentGames() {
@@ -203,7 +270,7 @@ function backfillAllGamesOnce() {
 
 function getArchives() {
   const profileResp = UrlFetchApp.fetch(
-    CHESS_COM_API_BASE + '/player/' + encodeURIComponent(PLAYER_USERNAME),
+    CHESS_COM_API_BASE + '/player/' + encodeURIComponent(getPlayerUsername()),
     { muteHttpExceptions: true }
   );
   if (profileResp.getResponseCode() !== 200) {
@@ -211,7 +278,7 @@ function getArchives() {
   }
 
   const archivesResp = UrlFetchApp.fetch(
-    CHESS_COM_API_BASE + '/player/' + encodeURIComponent(PLAYER_USERNAME) + '/games/archives',
+    CHESS_COM_API_BASE + '/player/' + encodeURIComponent(getPlayerUsername()) + '/games/archives',
     { muteHttpExceptions: true }
   );
   if (archivesResp.getResponseCode() !== 200) {
@@ -243,38 +310,7 @@ function ensureSheet() {
   var sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow([
-      'Timestamp',
-      'URL',
-      'Game ID',
-      'Rated',
-      'Time class',
-      'Time control',
-      'Base time (s)',
-      'Increment (s)',
-      'Rules',
-      'Format',
-      'Color',
-      'Opponent',
-      'Opponent rating',
-      'Opponent rating pregame',
-      'Opponent rating change',
-      'My rating',
-      'My rating pregame',
-      'My rating pregame_derived',
-      'My rating change',
-      'Result',
-      'Result_Value',
-      'Reason',
-      'FEN',
-      'Endboard URL',
-      'ECO',
-      'Opening URL',
-      'Moves (SAN)',
-      'Clocks',
-      'Clock Seconds',
-      'Move Times'
-    ]);
+    ensureHeaders(sheet, 'games', { freezeRows: 1 });
     return sheet;
   }
 
@@ -531,7 +567,7 @@ function buildRow(details) {
 }
 
 function normalizeGame(game) {
-  const playerLower = String(PLAYER_USERNAME || '').toLowerCase();
+  const playerLower = String(getPlayerUsername() || '').toLowerCase();
 
   var color = '';
   var side = null;
