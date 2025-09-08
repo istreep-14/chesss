@@ -514,6 +514,249 @@ function getDerivedRegistry_() {
     }
   };
 
+  // -------- Additional helpers for new derived fields --------
+  function formatLocalDateTime_(dateObj) {
+    try {
+      var tz = SpreadsheetApp.getActive().getSpreadsheetTimeZone();
+      return Utilities.formatDate(dateObj, tz || 'UTC', 'yyyy-MM-dd HH:mm:ss');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function epochSecToDate_(epochSec) {
+    if (epochSec == null || epochSec === '' || !isFinite(Number(epochSec))) return null;
+    try { return new Date(Number(epochSec) * 1000); } catch (e) { return null; }
+  }
+
+  function parseHmsToSeconds_(s) {
+    var t = String(s || '').trim();
+    if (!t) return null;
+    var parts = t.split(':').map(function(p){ return parseInt(p, 10); });
+    if (parts.length === 3 && parts.every(function(n){return isFinite(n);} )) return parts[0]*3600 + parts[1]*60 + parts[2];
+    if (parts.length === 2 && parts.every(function(n){return isFinite(n);} )) return parts[0]*60 + parts[1];
+    var n = parseInt(t, 10);
+    return isFinite(n) ? n : null;
+  }
+
+  function computeGameLengthSecondsFromPgn_(pgnTags) {
+    if (!pgnTags) return '';
+    var start = parseHmsToSeconds_(pgnTags['StartTime']);
+    var end = parseHmsToSeconds_(pgnTags['EndTime']);
+    if (start == null || end == null) return '';
+    var diff = end - start;
+    if (diff < 0) diff += 24 * 3600; // handle midnight rollover
+    return diff;
+  }
+
+  function extractClocksFromPgn_(pgnText) {
+    var re = /\[%clk\s+([0-9:]+)\]/g;
+    var clocks = [];
+    if (!pgnText) return clocks;
+    var m;
+    while ((m = re.exec(String(pgnText))) !== null) {
+      clocks.push(m[1]);
+    }
+    return clocks;
+  }
+
+  function clocksToSecondsList_(clocks) {
+    if (!clocks || !clocks.length) return [];
+    return clocks.map(function(c){ var n = parseHmsToSeconds_(c); return (n != null ? n : ''); });
+  }
+
+  function buildMoveDurations_(clockSecondsList, baseSec, incSec) {
+    if (!clockSecondsList || !clockSecondsList.length) return [];
+    var can = (baseSec != null && incSec != null && isFinite(baseSec) && isFinite(incSec));
+    if (!can) return [];
+    // Split by side: even indexes are white (0-based), odd are black
+    var white = [];
+    var black = [];
+    for (var i = 0; i < clockSecondsList.length; i++) {
+      var v = clockSecondsList[i];
+      if (!isFinite(v)) { if (i % 2 === 0) white.push(null); else black.push(null); continue; }
+      if (i % 2 === 0) white.push(v); else black.push(v);
+    }
+    function durationsFor(seq) {
+      var out = [];
+      for (var i = 0; i < seq.length; i++) {
+        var curr = seq[i];
+        if (curr == null) { out.push(''); continue; }
+        if (i === 0) {
+          out.push(Math.max(0, baseSec - curr + incSec));
+        } else {
+          var prev = seq[i-1];
+          if (prev == null) { out.push(''); continue; }
+          out.push(Math.max(0, prev - curr + incSec));
+        }
+      }
+      return out;
+    }
+    var wDur = durationsFor(white);
+    var bDur = durationsFor(black);
+    var merged = [];
+    var maxLen = Math.max(wDur.length, bDur.length);
+    for (var k = 0; k < maxLen; k++) {
+      if (k < wDur.length) merged.push(wDur[k]);
+      if (k < bDur.length) merged.push(bDur[k]);
+    }
+    return merged;
+  }
+
+  function listToBracedString_(arr) {
+    if (!arr || !arr.length) return '';
+    return '{' + arr.map(function(x){ return (x === '' || x == null) ? '' : String(x); }).join(', ') + '}';
+  }
+
+  // -------- New derived entries --------
+  registry.base_seconds = {
+    displayName: 'Base time (s)',
+    description: 'Initial time (seconds) parsed from time control',
+    example: 300,
+    compute: function(game, pgnTags, pgnMoves) {
+      var tc = (game && game.time_control) || (pgnTags && pgnTags['TimeControl']) || '';
+      return parseTimeControlString_(tc).initialSec;
+    }
+  };
+
+  registry.increment_seconds.displayName = 'Increment (s)';
+
+  registry.end_time_formatted = {
+    displayName: 'End Time (Local)',
+    description: 'Game end time formatted in spreadsheet time zone',
+    example: '2025-09-08 14:23:45',
+    compute: function(game) {
+      var d = epochSecToDate_(game && game.end_time);
+      return d ? formatLocalDateTime_(d) : '';
+    }
+  };
+
+  registry.end_year = { displayName: 'End Year', description: 'YYYY from end_time', example: 2025, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? d.getFullYear() : ''; } };
+  registry.end_month = { displayName: 'End Month', description: '1-12 from end_time', example: 9, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? (d.getMonth()+1) : ''; } };
+  registry.end_day = { displayName: 'End Day', description: '1-31 from end_time', example: 8, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? d.getDate() : ''; } };
+  registry.end_hour = { displayName: 'End Hour', description: '0-23 from end_time', example: 14, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? d.getHours() : ''; } };
+  registry.end_minute = { displayName: 'End Minute', description: '0-59 from end_time', example: 23, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? d.getMinutes() : ''; } };
+  registry.end_second = { displayName: 'End Second', description: '0-59 from end_time', example: 45, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? d.getSeconds() : ''; } };
+  registry.end_millisecond = { displayName: 'End Milliseconds', description: '0-999 from end_time', example: 123, compute: function(game){ var d = epochSecToDate_(game && game.end_time); return d ? d.getMilliseconds() : ''; } };
+
+  registry.game_length_seconds = {
+    displayName: 'GameLength (s)',
+    description: 'Derived from PGN tags EndTime - StartTime',
+    example: 420,
+    compute: function(game, pgnTags) { return computeGameLengthSecondsFromPgn_(pgnTags); }
+  };
+
+  registry.start_time_derived_local = {
+    displayName: 'Start Time (Local, derived)',
+    description: 'End Time minus GameLength (local time zone)',
+    example: '2025-09-08 14:16:45',
+    compute: function(game, pgnTags) {
+      var d = epochSecToDate_(game && game.end_time);
+      var len = computeGameLengthSecondsFromPgn_(pgnTags);
+      if (!d || !isFinite(len)) return '';
+      return formatLocalDateTime_(new Date(d.getTime() - Number(len) * 1000));
+    }
+  };
+
+  registry.moves_san_list = {
+    displayName: 'Moves (SAN)',
+    description: 'SAN moves block from PGN',
+    example: '1. e4 e5 2. Nf3 Nc6 ...',
+    compute: function(game, pgnTags, pgnMoves) { return pgnMoves || ''; }
+  };
+
+  registry.clocks_list = {
+    displayName: 'Clocks',
+    description: 'Clock tags extracted from PGN, in original format',
+    example: '{5:00, 5:00, 4:58, ...}',
+    compute: function(game) {
+      var pgn = (game && game.pgn) || '';
+      var clocks = extractClocksFromPgn_(pgn);
+      return listToBracedString_(clocks);
+    }
+  };
+
+  registry.clock_seconds_list = {
+    displayName: 'Clock Seconds',
+    description: 'Clock tags converted to seconds',
+    example: '{300, 300, 298, ...}',
+    compute: function(game) {
+      var pgn = (game && game.pgn) || '';
+      var clocks = extractClocksFromPgn_(pgn);
+      var secs = clocksToSecondsList_(clocks);
+      return listToBracedString_(secs);
+    }
+  };
+
+  registry.move_times_seconds = {
+    displayName: 'Clock Seconds_Incriment',
+    description: 'Per-ply durations including increment (legacy label)',
+    example: '{2, 2, 3, ...}',
+    compute: function(game) {
+      var pgn = (game && game.pgn) || '';
+      var clocks = extractClocksFromPgn_(pgn);
+      var secs = clocksToSecondsList_(clocks);
+      var tc = (game && game.time_control) || '';
+      var parsed = parseTimeControlString_(tc);
+      var durations = buildMoveDurations_(secs, parsed.initialSec, parsed.incrementSec);
+      return listToBracedString_(durations);
+    }
+  };
+
+  registry.reason = {
+    displayName: 'Reason',
+    description: 'Termination reason from PGN tag',
+    example: 'Time forfeit',
+    compute: function(game, pgnTags) { return (pgnTags && pgnTags['Termination']) || ''; }
+  };
+
+  registry.format = {
+    displayName: 'Format',
+    description: 'Format derived from rules/time_class (e.g., blitz, rapid, live960, daily 960)',
+    example: 'blitz',
+    compute: function(game, pgnTags) {
+      var rules = (game && game.rules) || '';
+      var timeClass = (game && game.time_class) || '';
+      if (rules === 'chess') return timeClass || '';
+      if (rules === 'chess960') return (timeClass === 'daily') ? 'daily 960' : 'live960';
+      return rules || '';
+    }
+  };
+
+  registry.opening_url = {
+    displayName: 'Opening URL',
+    description: 'From PGN ECOUrl/OpeningUrl or JSON opening_url',
+    example: 'https://www.chess.com/openings/...',
+    compute: function(game, pgnTags) {
+      var v = (pgnTags && (pgnTags['ECOUrl'] || pgnTags['OpeningUrl'])) || (game && game.opening_url) || '';
+      return v || '';
+    }
+  };
+
+  registry.endboard_url = {
+    displayName: 'Endboard URL',
+    description: 'Image URL for final FEN (service-dependent)',
+    example: 'https://www.chess.com/dynboard?fen=...'
+    ,compute: function(game) {
+      var fen = (game && game.fen) || '';
+      if (!fen) return '';
+      // Generic fallback compatible with chess.com dynamic board
+      return 'https://www.chess.com/dynboard?fen=' + encodeURIComponent(String(fen));
+    }
+  };
+
+  registry.rating_difference = {
+    displayName: 'RatingDiff (opp - mine)',
+    description: 'Black rating minus White rating (no player context in V2)',
+    example: 35,
+    compute: function(game) {
+      var w = game && game.white && game.white.rating;
+      var b = game && game.black && game.black.rating;
+      if (!isFinite(w) || !isFinite(b)) return '';
+      return Number(b) - Number(w);
+    }
+  };
+
   return registry;
 }
 
