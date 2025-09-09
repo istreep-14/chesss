@@ -620,6 +620,26 @@ function getDerivedRegistry_() {
     return tokens;
   }
 
+  function stripBracketTags_(s) {
+    return String(s || '').replace(/\[%[^\]]*\]/g, ' ');
+  }
+
+  function normalizeNumberedMovesText_(movesText) {
+    var t = String(movesText || '');
+    if (!t) return '';
+    t = stripCurlyComments_(t);
+    t = stripSemicolonComments_(t);
+    t = stripNagAnnotations_(t);
+    t = stripBracketTags_(t); // remove [%clk], [%eval], etc.
+    // Remove result tokens
+    t = t.replace(/\b(1-0|0-1|1\/2-1\/2|\*)\b/g, ' ');
+    // Normalize  "1..." to "1." style
+    t = t.replace(/\b(\d+)\.\.\./g, '$1.');
+    // Collapse whitespace
+    t = normalizeWhitespace_(t);
+    return t;
+  }
+
   function buildMoveDurations_(clockSecondsList, baseSec, incSec) {
     if (!clockSecondsList || !clockSecondsList.length) return [];
     var can = (baseSec != null && incSec != null && isFinite(baseSec) && isFinite(incSec));
@@ -722,6 +742,15 @@ function getDerivedRegistry_() {
     compute: function(game, pgnTags, pgnMoves) {
       var plies = extractSanPliesFromMoves_(pgnMoves);
       return listToBracedString_(plies);
+    }
+  };
+
+  registry.moves_list_numbered = {
+    displayName: 'Moves (numbered)',
+    description: 'Numbered SAN movetext (comments/NAG/clock tags removed)',
+    example: '1. e4 e5 2. Nf3 Nc6',
+    compute: function(game, pgnTags, pgnMoves) {
+      return normalizeNumberedMovesText_(pgnMoves);
     }
   };
 
