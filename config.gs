@@ -65,8 +65,7 @@ function setupConfig() {
 
   var groups = [
     ['Archive API', true, false],
-    ['Derived', true, false],
-    ['Opening Info', false, false]
+    ['Derived', true, false]
   ];
   sheet.getRange(tableStartRow + 2, 1, groups.length, 3).setValues(groups);
 
@@ -123,7 +122,7 @@ function readConfig_() {
   if (headerRow === -1) throw new Error('Data Groups header not found in Config. Run setupConfig() again.');
 
   // Read table rows until blank Data Group name
-  var groups = { archiveApi: { calculateNew: true, recalculate: false }, derived: { calculateNew: true, recalculate: false }, openingInfo: { calculateNew: false, recalculate: false } };
+  var groups = { archiveApi: { calculateNew: true, recalculate: false }, derived: { calculateNew: true, recalculate: false } };
   for (var tr = headerRow + 1; tr <= lastRow; tr++) {
     var name = String(sheet.getRange(tr, 1).getValue() || '').trim();
     if (!name) break;
@@ -131,7 +130,6 @@ function readConfig_() {
     var recal = !!sheet.getRange(tr, 3).getValue();
     if (/^archive api$/i.test(name)) groups.archiveApi = { calculateNew: calc, recalculate: recal };
     if (/^derived$/i.test(name)) groups.derived = { calculateNew: calc, recalculate: recal };
-    if (/^opening info$/i.test(name)) groups.openingInfo = { calculateNew: calc, recalculate: recal };
   }
 
   return {
